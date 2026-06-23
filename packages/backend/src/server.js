@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import path from "node:path";
@@ -9,6 +9,10 @@ import { ensureStorageDir } from "./services/storage.js";
 import { initDb } from "./services/db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "../../..");
+dotenv.config({ path: path.join(projectRoot, ".env") });
+dotenv.config();
+
 const app = express();
 const port = Number(process.env.PORT || 4000);
 
@@ -35,4 +39,3 @@ app.use((err, _req, res, _next) => {
 app.listen(port, () => {
   console.log(`Media Download API listening on http://localhost:${port}`);
 });
-

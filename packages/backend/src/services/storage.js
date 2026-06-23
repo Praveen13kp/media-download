@@ -3,9 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "../../../..");
 
 export function storageDir() {
-  return path.resolve(process.cwd(), process.env.STORAGE_DIR || path.resolve(__dirname, "../../storage"));
+  if (process.env.STORAGE_DIR) return path.resolve(projectRoot, process.env.STORAGE_DIR);
+  return path.resolve(__dirname, "../../storage");
 }
 
 export async function ensureStorageDir() {
@@ -19,4 +21,3 @@ export function safeFileName(input) {
     .trim()
     .slice(0, 120) || "download";
 }
-
