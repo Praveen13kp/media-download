@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs/promises";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
 
@@ -21,14 +22,27 @@ export async function analyzeUrl(url) {
 }
 
 export function startDownload(job, onUpdate) {
-  const outputTemplate = path.join(storageDir(), `${job.id}-%(title).120s.%(ext)s`);
+  const dir = storageDir(job.request.outputDir);
+  const outputTemplate = path.join(dir, `${job.id}-%(title).120s.%(ext)s`);
   const args = buildYtDlpArgs(job.request, outputTemplate);
+
+  // Ensure directory exists (handles custom outputDir)
+  fs.mkdir(dir, { recursive: true }).catch(() => null);
+
   const child = spawn("yt-dlp", args, { windowsHide: true });
 
   job.process = child;
   update(job, { state: DOWNLOAD_STATES.FETCHING }, onUpdate);
 
-  child.stdout.on("data", (chunk) => parseProgress(job, chunk.toString(), onUpdate));
+  // Capture title from print-json line emitted early in yt-dlp output
+  child.stdout.on("data", (chunk) => {
+    const text = chunk.toString();
+    if (!job.title) {
+      const m = text.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (m) job.title = m[1].replace(/\\"/g, '"');
+    }
+    parseProgress(job, text, onUpdate);
+  });
   child.stderr.on("data", (chunk) => parseProgress(job, chunk.toString(), onUpdate));
 
   child.on("error", (error) => {
@@ -62,7 +76,7 @@ export function startDownload(job, onUpdate) {
 }
 
 function buildYtDlpArgs(request, outputTemplate) {
-  const args = ["--newline", "--no-playlist", "-o", outputTemplate];
+  const args = ["--newline", "--no-playlist", "--print-json", "-o", outputTemplate];
 
   if (request.type === "audio") {
     args.push("-x", "--audio-format", request.format || "mp3", "--audio-quality", "0");

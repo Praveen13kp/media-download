@@ -1,9 +1,24 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 
+const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const devUrl = process.env.WEB_URL || "http://localhost:5173";
+
+let backendProcess = null;
+
+function startBackend() {
+  const serverPath = path.resolve(__dirname, "../../../packages/backend/src/server.js");
+  backendProcess = spawn(process.execPath, [serverPath], {
+    env: { ...process.env, PORT: "4000" },
+    windowsHide: true
+  });
+  backendProcess.stdout?.on("data", (d) => console.log("[backend]", d.toString().trim()));
+  backendProcess.stderr?.on("data", (d) => console.error("[backend]", d.toString().trim()));
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -26,9 +41,13 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  if (process.env.NODE_ENV === "production") startBackend();
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
+  backendProcess?.kill();
   if (process.platform !== "darwin") app.quit();
 });
 

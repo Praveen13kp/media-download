@@ -49,4 +49,9 @@ export function validateDownloadRequest(body) {
     error.status = 400;
     throw error;
   }
+  if (body.outputDir !== undefined && typeof body.outputDir !== "string") {
+    const error = new Error("outputDir must be a string path");
+    error.status = 400;
+    throw error;
+  }
 }

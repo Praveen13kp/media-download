@@ -2,12 +2,19 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { startDownload } from "./processor.js";
-import { persistJob } from "./db.js";
+import { persistJob, loadJobs } from "./db.js";
 
 const jobs = new Map();
 const events = new EventEmitter();
 const maxConcurrent = Number(process.env.MAX_CONCURRENT_DOWNLOADS || 2);
 let activeCount = 0;
+
+// Restore persisted jobs on startup (completed/failed history)
+loadJobs().then((rows) => {
+  for (const job of rows) {
+    if (!jobs.has(job.id)) jobs.set(job.id, job);
+  }
+}).catch((error) => console.error("Failed to load persisted jobs", error));
 
 export function createJob(request) {
   const job = {

@@ -53,6 +53,16 @@ export default function App() {
     }, 1500);
   }
 
+  async function jobControl(id, action) {
+    try {
+      const job = await request(`/api/downloads/${id}/${action}`, { method: "POST" });
+      setJobs((current) => current.map((item) => (item.id === id ? job : item)));
+      if (action === "retry") watchJob(id);
+    } catch (error) {
+      Alert.alert("Control failed", error.message);
+    }
+  }
+
   async function saveToDevice(job) {
     const permission = await MediaLibrary.requestPermissionsAsync();
     if (!permission.granted) {
@@ -101,10 +111,32 @@ export default function App() {
         {jobs.map((job) => (
           <View key={job.id} style={styles.card}>
             <Text numberOfLines={1} style={styles.heading}>{job.fileName || job.request.url}</Text>
-            <Text style={styles.muted}>{job.state} - {Math.round(job.progress || 0)}%</Text>
+            <Text style={styles.muted}>{job.state}{job.speed ? ` · ${job.speed}` : ""}{job.eta ? ` · ETA ${job.eta}` : ""} - {Math.round(job.progress || 0)}%</Text>
             <View style={styles.progressTrack}>
               <View style={[styles.progressBar, { width: `${Math.min(job.progress || 0, 100)}%` }]} />
             </View>
+            <View style={styles.controls}>
+              {job.state === "Paused" ? (
+                <TouchableOpacity onPress={() => jobControl(job.id, "resume")} style={styles.controlBtn}>
+                  <Text style={styles.controlText}>Resume</Text>
+                </TouchableOpacity>
+              ) : ["Pending", "Fetching information", "Processing", "Converting", "Downloading"].includes(job.state) ? (
+                <TouchableOpacity onPress={() => jobControl(job.id, "pause")} style={styles.controlBtn}>
+                  <Text style={styles.controlText}>Pause</Text>
+                </TouchableOpacity>
+              ) : null}
+              {!["Completed", "Failed", "Canceled"].includes(job.state) && (
+                <TouchableOpacity onPress={() => jobControl(job.id, "cancel")} style={[styles.controlBtn, styles.cancelBtn]}>
+                  <Text style={[styles.controlText, styles.cancelText]}>Cancel</Text>
+                </TouchableOpacity>
+              )}
+              {["Failed", "Canceled"].includes(job.state) && (
+                <TouchableOpacity onPress={() => jobControl(job.id, "retry")} style={styles.controlBtn}>
+                  <Text style={styles.controlText}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {job.error && <Text style={styles.errorText}>{job.error}</Text>}
             {job.state === "Completed" && (
               <TouchableOpacity onPress={() => saveToDevice(job)} style={styles.secondaryButton}>
                 <Text style={styles.secondaryText}>Save to Device Storage</Text>
@@ -180,6 +212,12 @@ const styles = StyleSheet.create({
   progressBar: { height: 8, backgroundColor: "#1d7a8c" },
   secondaryButton: { minHeight: 40, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#1d7a8c", borderRadius: 6 },
   secondaryText: { color: "#1d7a8c", fontWeight: "800" },
+  controls: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  controlBtn: { minHeight: 34, paddingHorizontal: 14, alignItems: "center", justifyContent: "center", borderRadius: 6, borderWidth: 1, borderColor: "#1d7a8c" },
+  controlText: { color: "#1d7a8c", fontWeight: "700", fontSize: 13 },
+  cancelBtn: { borderColor: "#d9534f" },
+  cancelText: { color: "#d9534f" },
+  errorText: { color: "#d9534f", fontSize: 12 },
   linkButton: { alignItems: "center", paddingVertical: 6 },
   linkText: { color: "#536170", fontSize: 12 }
 });

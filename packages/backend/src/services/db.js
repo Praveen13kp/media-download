@@ -37,3 +37,24 @@ export async function persistJob(job) {
   );
 }
 
+export async function loadJobs() {
+  if (!pool) return [];
+  const { rows } = await pool.query(
+    `select id, payload as request, state, progress, file_name as "fileName", output_path as "outputPath", error, created_at as "createdAt", updated_at as "updatedAt"
+     from downloads order by created_at desc limit 200`
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    request: row.request,
+    state: row.state,
+    progress: Number(row.progress) || 0,
+    speed: null,
+    eta: null,
+    fileName: row.fileName,
+    outputPath: row.outputPath,
+    error: row.error,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+}
+

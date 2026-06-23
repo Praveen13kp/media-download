@@ -30,6 +30,7 @@ function App() {
   const [selected, setSelected] = useState({ type: "video", quality: "1080p", format: "mp4" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [downloadFolder, setDownloadFolder] = useState(null);
 
   useEffect(() => {
     refreshDownloads();
@@ -70,9 +71,11 @@ function App() {
   async function startDownload() {
     setError("");
     try {
+      const body = { url, ...selected };
+      if (downloadFolder) body.outputDir = downloadFolder;
       const job = await api("/api/downloads", {
         method: "POST",
-        body: JSON.stringify({ url, ...selected })
+        body: JSON.stringify(body)
       });
       setDownloads((current) => [job, ...current]);
       subscribe(job.id);
@@ -116,6 +119,20 @@ function App() {
                 Analyze
               </button>
             </div>
+            {window.desktop && (
+              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                <button
+                  className="button small"
+                  onClick={async () => {
+                    const folder = await window.desktop.chooseDownloadFolder();
+                    if (folder) setDownloadFolder(folder);
+                  }}
+                >
+                  Choose folder
+                </button>
+                <span className="truncate">{downloadFolder || "Default storage folder"}</span>
+              </div>
+            )}
             {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
 
@@ -252,18 +269,27 @@ function DownloadQueue({ downloads, control, apiBase, token }) {
             <div className="mt-3 flex flex-wrap gap-2">
               {job.state === "Paused" ? (
                 <button className="icon-button" onClick={() => control(job.id, "resume")} title="Resume"><Play size={15} /></button>
-              ) : (
+              ) : ["Pending", "Fetching information", "Processing", "Converting", "Downloading"].includes(job.state) ? (
                 <button className="icon-button" onClick={() => control(job.id, "pause")} title="Pause"><Pause size={15} /></button>
+              ) : null}
+              {!["Completed", "Failed", "Canceled"].includes(job.state) && (
+                <button className="icon-button" onClick={() => control(job.id, "cancel")} title="Cancel"><Square size={15} /></button>
               )}
-              <button className="icon-button" onClick={() => control(job.id, "cancel")} title="Cancel"><Square size={15} /></button>
               {["Failed", "Canceled"].includes(job.state) && (
                 <button className="icon-button" onClick={() => control(job.id, "retry")} title="Retry"><RotateCcw size={15} /></button>
               )}
               {job.state === "Completed" && (
-                <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`}>
-                  <Download size={15} />
-                  Save
-                </a>
+                <>
+                  <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`}>
+                    <Download size={15} />
+                    Save
+                  </a>
+                  {window.desktop && job.outputPath && (
+                    <button className="button small" onClick={() => window.desktop.openPath(job.outputPath)}>
+                      Open
+                    </button>
+                  )}
+                </>
               )}
             </div>
             {job.error && <p className="mt-2 text-xs text-red-600">{job.error}</p>}
