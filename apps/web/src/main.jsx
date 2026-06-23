@@ -280,7 +280,7 @@ function DownloadQueue({ downloads, control, apiBase, token }) {
               )}
               {job.state === "Completed" && (
                 <>
-                  <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`}>
+                  <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`} download={job.fileName}>
                     <Download size={15} />
                     Save
                   </a>
@@ -311,7 +311,7 @@ function HistoryPanel({ downloads, apiBase, token }) {
       <div className="space-y-2">
         {completed.length === 0 && <p className="text-sm text-slate-500">Completed files appear here.</p>}
         {completed.map((job) => (
-          <a key={job.id} href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`} className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm hover:bg-slate-50">
+          <a key={job.id} href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`} download={job.fileName} className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm hover:bg-slate-50">
             <JobIcon type={job.request.type} />
             <span className="min-w-0 flex-1 truncate">{job.fileName}</span>
             <Download size={15} />

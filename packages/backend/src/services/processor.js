@@ -49,7 +49,7 @@ export function startDownload(job, onUpdate) {
     update(job, { state: DOWNLOAD_STATES.FAILED, error: error.message, process: null }, onUpdate);
   });
 
-  child.on("close", (code) => {
+  child.on("close", async (code) => {
     job.process = null;
     if (job.cancelRequested) {
       update(job, { state: DOWNLOAD_STATES.CANCELED }, onUpdate);
@@ -63,12 +63,32 @@ export function startDownload(job, onUpdate) {
       update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}` }, onUpdate);
       return;
     }
-    const fileName = job.lastFileName || `${safeFileName(job.title || "download")}.${job.request.format}`;
+
+    // Verify the expected output file exists; if not, find the actual file yt-dlp created
+    const expectedFileName = job.lastFileName || `${safeFileName(job.title || "download")}.${job.request.format}`;
+    const expectedPath = job.lastOutputPath || path.join(storageDir(job.request.outputDir), expectedFileName);
+
+    let finalPath = expectedPath;
+    let finalName = expectedFileName;
+
+    try {
+      await fs.access(expectedPath);
+    } catch {
+      // Expected file missing — find any file in storage matching the job id prefix
+      const dir = storageDir(job.request.outputDir);
+      const files = await fs.readdir(dir).catch(() => []);
+      const match = files.find((f) => f.startsWith(job.id));
+      if (match) {
+        finalPath = path.join(dir, match);
+        finalName = match.replace(/^[a-f0-9-]{36}-/, "");
+      }
+    }
+
     update(job, {
       state: DOWNLOAD_STATES.COMPLETED,
       progress: 100,
-      fileName,
-      outputPath: job.lastOutputPath || path.join(storageDir(), fileName)
+      fileName: finalName,
+      outputPath: finalPath
     }, onUpdate);
   });
 
