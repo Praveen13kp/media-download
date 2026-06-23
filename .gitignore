@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+packages/backend/storage/*
+!packages/backend/storage/.gitkeep
+apps/desktop/release/
+apps/mobile/.expo/
+

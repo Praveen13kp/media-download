@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Authorized Media Downloader",
+  "description": "Adds an authorized download panel to supported YouTube video pages and sends jobs to the local backend.",
+  "version": "0.1.0",
+  "permissions": ["downloads", "storage", "activeTab"],
+  "host_permissions": ["http://localhost:4000/*", "https://www.youtube.com/*", "https://youtube.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*", "https://youtube.com/watch*"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Media Downloader"
+  }
+}
+

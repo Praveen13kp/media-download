@@ -1,0 +1,21 @@
+{
+  "name": "@media/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "lint": "node -c App.js"
+  },
+  "dependencies": {
+    "expo": "^51.0.0",
+    "expo-file-system": "^17.0.1",
+    "expo-media-library": "^16.0.4",
+    "expo-status-bar": "^1.12.1",
+    "react": "^18.2.0",
+    "react-native": "^0.74.0"
+  }
+}
+

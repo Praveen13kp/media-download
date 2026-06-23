@@ -1,0 +1,23 @@
+{
+  "name": "media-download-system",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cross-platform authorized media downloader with web, desktop, extension, mobile, and backend packages.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @media/backend",
+    "dev:backend": "npm run dev -w @media/backend",
+    "dev:web": "npm run dev -w @media/web",
+    "dev:desktop": "npm run dev -w @media/desktop",
+    "dev:mobile": "npm run start -w @media/mobile",
+    "build": "npm run build -w @media/web && npm run build -w @media/backend",
+    "lint": "npm run lint -ws --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+

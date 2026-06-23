@@ -1,0 +1,49 @@
+.amd-panel {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid #dfe3ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  font-family: Arial, sans-serif;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.amd-title {
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.amd-row {
+  display: grid;
+  grid-template-columns: 1fr 96px 88px;
+  gap: 8px;
+}
+
+.amd-panel select,
+.amd-button {
+  min-height: 34px;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #17202a;
+  font-size: 13px;
+}
+
+.amd-button {
+  width: 100%;
+  margin-top: 10px;
+  border-color: #1d7a8c;
+  background: #1d7a8c;
+  color: white;
+  font-weight: 700;
+}
+
+.amd-status {
+  margin: 8px 0 0;
+  min-height: 16px;
+  color: #536170;
+  font-size: 12px;
+}
+

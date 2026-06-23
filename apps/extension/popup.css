@@ -1,0 +1,40 @@
+body {
+  width: 280px;
+  margin: 0;
+  padding: 14px;
+  color: #17202a;
+  font-family: Arial, sans-serif;
+}
+
+label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+input {
+  width: 100%;
+  height: 34px;
+  margin-top: 4px;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+
+button {
+  width: 100%;
+  height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: #1d7a8c;
+  color: #fff;
+  font-weight: 700;
+}
+
+#status {
+  min-height: 16px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+

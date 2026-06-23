@@ -1,0 +1,36 @@
+{
+  "name": "@media/desktop",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "package:win": "electron-builder --win nsis portable",
+    "lint": "node -c src/main.js"
+  },
+  "dependencies": {
+    "electron": "^31.4.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.media.download.manager",
+    "productName": "Media Download Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "../web/dist/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}
+
