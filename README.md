@@ -1,85 +1,69 @@
-﻿# Media Download
+﻿# Media Download Manager
 
-Cross-platform media download system for authorized video/audio sources.
+Desktop application for downloading media from supported sources.
 
-This monorepo contains:
+---
 
-- `packages/backend`: Node.js + Express API, queue manager, progress/status endpoints, optional PostgreSQL persistence, and `yt-dlp`/`ffmpeg` processing hooks.
-- `apps/web`: React + Tailwind UI for URL analysis, format selection, active downloads, controls, and history.
-- `apps/desktop`: Electron shell for the web UI, with Windows packaging config.
-- `apps/extension`: Chrome Extension MV3 panel for YouTube watch pages that sends jobs to the backend.
-- `apps/mobile`: React Native/Expo client with media-library save hooks for Android and iOS where allowed.
-- `packages/shared`: Shared status/type constants.
+## For Users (Quick Start)
 
-Use this system only for media you own, media you are authorized to download, or sources where downloading is allowed.
+### Option A — Desktop App (Recommended)
 
-## Requirements
+1. **Install prerequisites** (one-time):
+   - [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) — `winget install yt-dlp.yt-dlp`
+   - [ffmpeg](https://ffmpeg.org/download.html) — `winget install Gyan.FFmpeg`
 
-- Node.js 20+
-- `yt-dlp` available on `PATH`
-- `ffmpeg` available on `PATH` for conversion/muxing
-- PostgreSQL 14+ if you want persistent history through `DATABASE_URL`
+2. Download the latest **Media Download Manager Setup.exe** from releases.
+   Install it (or use the portable version).
 
-## Setup
+3. Open the app, paste a video URL, click Analyze, pick options, click **Start Download**.
+
+> The app handles everything — no browser tabs, no extensions needed.
+
+### Option B — Browser (Dev)
 
 ```bash
 npm install
-cp .env.example .env
-npm run dev:backend
-npm run dev:web
+npm run dev:backend   # Terminal 1: API server on http://localhost:4000
+npm run dev:web       # Terminal 2: Web UI on http://localhost:5173
 ```
 
-Backend defaults to `http://localhost:4000`. If `API_TOKEN` is set, configure the same token in web/mobile env vars or in the Chrome extension popup.
+Open `http://localhost:5173` in Chrome.
 
-## Backend API
+### Option C — One-click script
 
-- `POST /api/media/analyze`
-- `POST /api/downloads`
-- `GET /api/downloads`
-- `GET /api/downloads/:id`
-- `GET /api/downloads/:id/events`
-- `POST /api/downloads/:id/pause`
-- `POST /api/downloads/:id/resume`
-- `POST /api/downloads/:id/cancel`
-- `POST /api/downloads/:id/retry`
-- `GET /api/downloads/:id/file`
+Double-click **`start.bat`** (or right-click **`start.ps1`** → Run with PowerShell).
+It checks prerequisites, installs deps, and opens the app in your browser.
 
-Example request:
+---
 
-```json
-{
-  "url": "https://example.com/video",
-  "type": "video",
-  "quality": "1080p",
-  "format": "mp4"
-}
-```
-
-## Chrome Extension
-
-1. Start the backend.
-2. Open `chrome://extensions`.
-3. Enable Developer Mode.
-4. Load unpacked extension from `apps/extension`.
-5. Open the extension popup and set backend URL/token if needed.
-
-## Desktop
+## For Developers
 
 ```bash
-npm run dev:backend
-npm run dev:desktop
+npm install
+npm run dev:backend   # API at http://localhost:4000
+npm run dev:web       # UI at http://localhost:5173
+npm run dev:desktop   # Electron app (dev mode)
 ```
 
-Build a Windows installer/portable executable:
+### Build desktop installer
 
 ```bash
-npm run package:win -w @media/desktop
+npm run package       # Produces .exe in apps/desktop/release/
 ```
 
-## Mobile
+### Security
 
-```bash
-npm run dev:mobile
-```
+Set `API_TOKEN=your-secret` in `.env` to require authentication on all API requests.
+See `.env.example` for all config options.
 
-Set `EXPO_PUBLIC_API_BASE_URL` to a backend URL reachable from the phone or emulator. Completed files can be saved to the device media library where the OS permits indexing.
+---
+
+## Architecture
+
+| Package | Description |
+|---------|-------------|
+| `packages/backend` | Node.js + Express API, yt-dlp/ffmpeg processing |
+| `apps/web` | React + Tailwind UI for URL analysis and downloads |
+| `apps/desktop` | Electron shell packaging the web UI + backend |
+
+Built with a monorepo (npm workspaces).

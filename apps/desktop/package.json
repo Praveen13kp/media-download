@@ -2,35 +2,65 @@
   "name": "@media/desktop",
   "version": "0.1.0",
   "type": "module",
+  "description": "Desktop media download manager with built-in web UI and API",
+  "author": "Media Download Team",
   "main": "src/main.js",
   "scripts": {
     "dev": "electron .",
-    "package:win": "electron-builder --win nsis portable",
+    "package:win": "node scripts/build.mjs",
     "lint": "node -c src/main.js"
   },
-  "dependencies": {
-    "electron": "^31.4.0"
-  },
   "devDependencies": {
+    "electron": "^31.4.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.media.download.manager",
     "productName": "Media Download Manager",
+    "electronVersion": "31.4.0",
     "directories": {
       "output": "release"
     },
     "files": [
       "src/**/*",
-      "package.json",
-      "../web/dist/**/*"
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build-resources/packages",
+        "to": "app/packages",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "build-resources/apps/web/dist",
+        "to": "app/apps/web/dist",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Media Download Manager"
+    },
+    "portable": {
+      "artifactName": "Media-Download-Manager-Portable-${version}.exe"
     }
   }
 }
-

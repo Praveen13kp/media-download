@@ -84,12 +84,27 @@ function App() {
     }
   }
 
+  function triggerDownload(url, filename) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   function subscribe(id) {
     const source = new EventSource(`${API_BASE}/api/downloads/${id}/events${API_TOKEN ? `?token=${API_TOKEN}` : ""}`);
     source.onmessage = (event) => {
       const job = JSON.parse(event.data);
       setDownloads((current) => current.map((item) => (item.id === job.id ? job : item)));
-      if (["Completed", "Failed", "Canceled"].includes(job.state)) source.close();
+      if (job.state === "Completed") {
+        source.close();
+        const fileUrl = `${API_BASE}/api/downloads/${job.id}/file${API_TOKEN ? `?token=${encodeURIComponent(API_TOKEN)}` : ""}`;
+        triggerDownload(fileUrl, job.fileName);
+      } else if (["Failed", "Canceled"].includes(job.state)) {
+        source.close();
+      }
     };
     source.onerror = () => source.close();
   }
