@@ -15,7 +15,9 @@
     "dev:mobile": "npm run start -w @media/mobile",
     "build": "npm run build -w @media/web && npm run build -w @media/backend",
     "package": "npm run build -w @media/web && npm run package:win -w @media/desktop",
-    "lint": "npm run lint -ws --if-present"
+    "lint": "npm run lint -ws --if-present",
+    "apk:build": "npm run build -w @media/web && npx -w @media/web cap sync android",
+    "apk:open": "npx -w @media/web cap open android"
   },
   "engines": {
     "node": ">=20"

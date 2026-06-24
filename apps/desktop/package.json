@@ -18,6 +18,8 @@
     "appId": "com.media.download.manager",
     "productName": "Media Download Manager",
     "electronVersion": "31.4.0",
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
     "directories": {
       "output": "release"
     },
