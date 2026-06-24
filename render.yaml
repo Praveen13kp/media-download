@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: media-download-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start -w @media/backend
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: MAX_CONCURRENT_DOWNLOADS
+        value: "2"
+      - key: STORAGE_DIR
+        value: /tmp/media-storage
+      - key: API_BASE_URL
+        sync: false
+      - key: PUBLIC_API_BASE_URL
+        sync: false
