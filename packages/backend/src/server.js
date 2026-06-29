@@ -41,6 +41,12 @@ app.use("/api/media", mediaRouter);
 app.use("/api/downloads", downloadsRouter);
 app.use("/storage", express.static(path.resolve(__dirname, "../storage")));
 
+const webDist = path.resolve(projectRoot, "apps/web/dist");
+app.use(express.static(webDist));
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(webDist, "index.html"));
+});
+
 app.use((err, _req, res, _next) => {
   console.error(err);
   const status = err.status || 500;

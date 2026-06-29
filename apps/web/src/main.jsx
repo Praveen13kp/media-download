@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, FileAudio, FileVideo, History, Link, Pause, Play, RotateCcw, Search, Square, X } from "lucide-react";
+import { Download, FileAudio, FileVideo, History, Link, Pause, Play, RotateCcw, Search, Square } from "lucide-react";
 import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 const API_TOKEN = import.meta.env.VITE_API_TOKEN || "";
 
 function apiHeaders() {
@@ -30,7 +30,6 @@ function App() {
   const [selected, setSelected] = useState({ type: "video", quality: "1080p", format: "mp4" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [downloadFolder, setDownloadFolder] = useState(null);
 
   useEffect(() => {
     refreshDownloads();
@@ -72,7 +71,6 @@ function App() {
     setError("");
     try {
       const body = { url, ...selected };
-      if (downloadFolder) body.outputDir = downloadFolder;
       const job = await api("/api/downloads", {
         method: "POST",
         body: JSON.stringify(body)
@@ -134,20 +132,6 @@ function App() {
                 Analyze
               </button>
             </div>
-            {window.desktop && (
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-                <button
-                  className="button small"
-                  onClick={async () => {
-                    const folder = await window.desktop.chooseDownloadFolder();
-                    if (folder) setDownloadFolder(folder);
-                  }}
-                >
-                  Choose folder
-                </button>
-                <span className="truncate">{downloadFolder || "Default storage folder"}</span>
-              </div>
-            )}
             {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
 
@@ -294,17 +278,10 @@ function DownloadQueue({ downloads, control, apiBase, token }) {
                 <button className="icon-button" onClick={() => control(job.id, "retry")} title="Retry"><RotateCcw size={15} /></button>
               )}
               {job.state === "Completed" && (
-                <>
-                  <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`} download={job.fileName}>
-                    <Download size={15} />
-                    Save
-                  </a>
-                  {window.desktop && job.outputPath && (
-                    <button className="button small" onClick={() => window.desktop.openPath(job.outputPath)}>
-                      Open
-                    </button>
-                  )}
-                </>
+                <a className="button small" href={`${apiBase}/api/downloads/${job.id}/file${token ? `?token=${token}` : ""}`} download={job.fileName}>
+                  <Download size={15} />
+                  Save
+                </a>
               )}
             </div>
             {job.error && <p className="mt-2 text-xs text-red-600">{job.error}</p>}
