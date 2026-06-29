@@ -15,11 +15,17 @@ const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 
 export async function analyzeUrl(url) {
-  const raw = await runCommand(YT_DLP, ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
+  let raw;
+  try {
+    raw = await runCommand(YT_DLP, ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
+  } catch (err) {
+    throw Object.assign(new Error(`Media analyzer failed: ${err.message}`), { status: 502 });
+  }
   let info;
   try {
     info = JSON.parse(raw);
   } catch {
+    console.error("yt-dlp raw output (first 500 chars):", raw?.slice(0, 500));
     throw Object.assign(new Error("Failed to parse media information"), { status: 502 });
   }
   const formats = normalizeFormats(info.formats || []);

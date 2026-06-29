@@ -22,7 +22,11 @@ if (!fs.existsSync(ytDlpPath)) {
     }).on("error", reject);
   });
   execSync(`chmod +x "${ytDlpPath}"`, { stdio: "inherit" });
-  console.log("yt-dlp downloaded");
+  const version = execSync(`"${ytDlpPath}" --version`, { encoding: "utf-8" }).trim();
+  console.log(`yt-dlp v${version} downloaded`);
+} else {
+  const version = execSync(`"${ytDlpPath}" --version`, { encoding: "utf-8" }).trim();
+  console.log(`yt-dlp v${version} (cached)`);
 }
 
 console.log("Render setup complete");
