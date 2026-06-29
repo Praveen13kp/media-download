@@ -30,14 +30,17 @@ export async function analyzeUrl(url) {
   try {
     raw = await runCommand(resolveYtDlp(), ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
   } catch (err) {
-    throw Object.assign(new Error(`Media analyzer failed: ${err.message}`), { status: 502 });
+    console.error("yt-dlp failed:", err.message);
+    throw Object.assign(new Error(err.message), { status: 502 });
   }
   let info;
   try {
     info = JSON.parse(raw);
   } catch {
-    console.error("yt-dlp raw output (first 500 chars):", raw?.slice(0, 500));
-    throw Object.assign(new Error("Failed to parse media information"), { status: 502 });
+    console.error("=== yt-dlp stdout (first 2000 chars) ===");
+    console.error(raw?.slice(0, 2000));
+    console.error("=== yt-dlp stdout end ===");
+    throw Object.assign(new Error(`yt-dlp returned non-JSON output: ${raw?.slice(0, 200)}`), { status: 502 });
   }
   const formats = normalizeFormats(info.formats || []);
 
@@ -258,7 +261,14 @@ function runCommand(command, args, timeoutMs) {
       if (timer) clearTimeout(timer);
       if (timedOut) return;
       if (code === 0) resolve(stdout);
-      else reject(new Error(stderr || `${command} exited with code ${code}`));
+      else {
+        const msg = stderr.trim() || stdout.trim() || `${command} exited with code ${code}`;
+        console.error(`=== yt-dlp exit code ${code} ===`);
+        if (stderr) console.error("stderr:", stderr.slice(0, 1000));
+        if (stdout) console.error("stdout:", stdout.slice(0, 500));
+        console.error("=== end ===");
+        reject(new Error(msg));
+      }
     });
   });
 }
