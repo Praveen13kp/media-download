@@ -1,7 +1,8 @@
 import { execSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import fs from "node:fs/promises";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
@@ -13,6 +14,24 @@ const localYtDlp = path.join(binDir, "yt-dlp");
 // Add local bin to PATH so spawned processes find yt-dlp and ffmpeg
 if (process.env.PATH && !process.env.PATH.includes(binDir)) {
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
+}
+
+// Write YouTube cookies if YOUTUBE_COOKIES env var is set
+const cookieFile = path.join(os.tmpdir(), "yt-dlp-cookies.txt");
+if (process.env.YOUTUBE_COOKIES) {
+  try {
+    writeFileSync(cookieFile, process.env.YOUTUBE_COOKIES, "utf-8");
+    console.log("YouTube cookies: loaded");
+  } catch (err) {
+    console.error("Failed to write cookies file:", err.message);
+  }
+}
+
+function cookieArgs() {
+  if (process.env.YOUTUBE_COOKIES && existsSync(cookieFile)) {
+    return ["--cookies", cookieFile];
+  }
+  return [];
 }
 
 function resolveYtDlp() {
@@ -52,10 +71,14 @@ const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 export async function analyzeUrl(url) {
   let raw;
   try {
-    raw = await runCommand(resolveYtDlp(), ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
+    const args = [...cookieArgs(), "--dump-json", "--no-playlist", url];
+    raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
   } catch (err) {
     console.error("yt-dlp failed:", err.message);
-    throw Object.assign(new Error(err.message), { status: 502 });
+    const msg = err.message.includes("Sign in to confirm")
+      ? "YouTube requires authentication. Set the YOUTUBE_COOKIES environment variable."
+      : err.message;
+    throw Object.assign(new Error(msg), { status: 502 });
   }
   if (!raw || !raw.trim()) {
     throw Object.assign(new Error("yt-dlp produced no output"), { status: 502 });
@@ -182,7 +205,7 @@ export function startDownload(job, onUpdate) {
 }
 
 function buildYtDlpArgs(request, outputTemplate) {
-  const args = ["--newline", "--no-playlist", "--print-json", "-o", outputTemplate];
+  const args = [...cookieArgs(), "--newline", "--no-playlist", "--print-json", "-o", outputTemplate];
 
   if (request.type === "audio") {
     args.push("-x", "--audio-format", request.format || "mp3", "--audio-quality", "0");
