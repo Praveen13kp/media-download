@@ -1,8 +1,7 @@
 import { execSync, spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import fs from "node:fs/promises";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
@@ -16,23 +15,9 @@ if (process.env.PATH && !process.env.PATH.includes(binDir)) {
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
 }
 
-// Write YouTube cookies if YOUTUBE_COOKIES env var is set
-const cookieFile = path.join(os.tmpdir(), "yt-dlp-cookies.txt");
-if (process.env.YOUTUBE_COOKIES) {
-  try {
-    writeFileSync(cookieFile, process.env.YOUTUBE_COOKIES, "utf-8");
-    console.log("YouTube cookies: loaded");
-  } catch (err) {
-    console.error("Failed to write cookies file:", err.message);
-  }
-}
-
-function cookieArgs() {
-  if (process.env.YOUTUBE_COOKIES && existsSync(cookieFile)) {
-    return ["--cookies", cookieFile];
-  }
-  return [];
-}
+// Configurable extraction options
+const EXTRACTOR_RETRIES = process.env.YT_EXTRACTOR_RETRIES || "3";
+const USER_AGENT = process.env.YT_USER_AGENT || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 function resolveYtDlp() {
   if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
@@ -71,13 +56,18 @@ const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 export async function analyzeUrl(url) {
   let raw;
   try {
-    const args = [...cookieArgs(), "--dump-json", "--no-playlist", url];
+    const args = [
+      "--dump-json", "--no-playlist",
+      "--retries", EXTRACTOR_RETRIES,
+      "--extractor-retries", EXTRACTOR_RETRIES,
+      "--fragment-retries", EXTRACTOR_RETRIES,
+      "--user-agent", USER_AGENT,
+      url,
+    ];
     raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
   } catch (err) {
     console.error("yt-dlp failed:", err.message);
-    const msg = err.message.includes("Sign in to confirm")
-      ? "YouTube requires authentication. Set the YOUTUBE_COOKIES environment variable."
-      : err.message;
+    const msg = friendlyError(err.message);
     throw Object.assign(new Error(msg), { status: 502 });
   }
   if (!raw || !raw.trim()) {
@@ -205,7 +195,13 @@ export function startDownload(job, onUpdate) {
 }
 
 function buildYtDlpArgs(request, outputTemplate) {
-  const args = [...cookieArgs(), "--newline", "--no-playlist", "--print-json", "-o", outputTemplate];
+  const args = [
+    "--newline", "--no-playlist", "--print-json", "-o", outputTemplate,
+    "--retries", EXTRACTOR_RETRIES,
+    "--extractor-retries", EXTRACTOR_RETRIES,
+    "--fragment-retries", EXTRACTOR_RETRIES,
+    "--user-agent", USER_AGENT,
+  ];
 
   if (request.type === "audio") {
     args.push("-x", "--audio-format", request.format || "mp3", "--audio-quality", "0");
@@ -235,6 +231,28 @@ function height(quality) {
   if (quality === "best") return 99999;
   const parsed = Number.parseInt(String(quality).replace("p", ""), 10);
   return Number.isFinite(parsed) ? parsed : 1080;
+}
+
+function friendlyError(msg) {
+  if (msg.includes("Sign in to confirm")) {
+    return "YouTube is blocking this request (bot detection). Try a different video or try again later.";
+  }
+  if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
+    return "This video is unavailable (private, deleted, or geo-blocked).";
+  }
+  if (msg.includes("Private video")) {
+    return "This is a private video. Only the owner can access it.";
+  }
+  if (msg.includes("age") || msg.includes("Age")) {
+    return "This video is age-restricted and cannot be accessed without a signed-in account.";
+  }
+  if (msg.includes("Copyright")) {
+    return "This video is blocked due to a copyright claim.";
+  }
+  if (msg.includes("HTTP Error") || msg.includes("Connection")) {
+    return "Network error when contacting the video platform. Try again later.";
+  }
+  return msg;
 }
 
 function normalizeFormats(formats) {
