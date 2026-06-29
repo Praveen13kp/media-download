@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install && npm run build:web
+    buildCommand: npm install
     startCommand: npm start -w @media/backend
     envVars:
       - key: NODE_VERSION

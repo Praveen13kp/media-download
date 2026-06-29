@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mediaRouter } from "./routes/media.js";
@@ -42,10 +43,20 @@ app.use("/api/downloads", downloadsRouter);
 app.use("/storage", express.static(path.resolve(__dirname, "../storage")));
 
 const webDist = path.resolve(projectRoot, "apps/web/dist");
-app.use(express.static(webDist));
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(webDist, "index.html"));
-});
+const hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
+
+if (hasWeb) {
+  console.log(`Serving web UI from ${webDist}`);
+  app.use(express.static(webDist));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(webDist, "index.html"));
+  });
+} else {
+  console.log(`Web dist not found at ${webDist} — serving API only`);
+  app.get("/", (_req, res) => {
+    res.send(`<!DOCTYPE html><html><body><h1>Media Download API</h1><p>API is running. Web UI not built.</p><p>Health: <a href="/health">/health</a></p></body></html>`);
+  });
+}
 
 app.use((err, _req, res, _next) => {
   console.error(err);
