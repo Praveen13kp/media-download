@@ -8,7 +8,18 @@ import { safeFileName, storageDir } from "./storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localYtDlp = path.resolve(__dirname, "../../bin/yt-dlp");
-const YT_DLP = existsSync(localYtDlp) ? localYtDlp : "yt-dlp";
+
+function resolveYtDlp() {
+  if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
+    return process.env.YT_DLP_PATH;
+  }
+  if (existsSync(localYtDlp)) {
+    return localYtDlp;
+  }
+  return "yt-dlp";
+}
+
+console.log(`yt-dlp binary: ${resolveYtDlp()}`);
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
@@ -17,7 +28,7 @@ const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 export async function analyzeUrl(url) {
   let raw;
   try {
-    raw = await runCommand(YT_DLP, ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
+    raw = await runCommand(resolveYtDlp(), ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
   } catch (err) {
     throw Object.assign(new Error(`Media analyzer failed: ${err.message}`), { status: 502 });
   }
@@ -50,7 +61,7 @@ export function startDownload(job, onUpdate) {
   // Ensure directory exists (handles custom outputDir)
   fs.mkdir(dir, { recursive: true }).catch(() => null);
 
-  const child = spawn(YT_DLP, args, { windowsHide: true });
+  const child = spawn(resolveYtDlp(), args, { windowsHide: true });
 
   job.process = child;
   update(job, { state: DOWNLOAD_STATES.FETCHING }, onUpdate);

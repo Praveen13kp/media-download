@@ -17,6 +17,7 @@ dotenv.config({ path: path.join(projectRoot, ".env") });
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 4000);
 
 await ensureStorageDir();
