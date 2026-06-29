@@ -7,7 +7,13 @@ import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const localYtDlp = path.resolve(__dirname, "../../bin/yt-dlp");
+const binDir = path.resolve(__dirname, "../../bin");
+const localYtDlp = path.join(binDir, "yt-dlp");
+
+// Add local bin to PATH so spawned processes find yt-dlp and ffmpeg
+if (process.env.PATH && !process.env.PATH.includes(binDir)) {
+  process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
+}
 
 function resolveYtDlp() {
   if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
@@ -26,8 +32,17 @@ try {
   const ver = execSync(`"${YT_DLP}" --version 2>&1`, { encoding: "utf-8", timeout: 15000, shell: true }).trim();
   console.log(`yt-dlp version: ${ver}`);
 } catch (err) {
-  const detail = (err.stderr || err.stdout || "").toString().slice(0, 500) || err.message;
-  console.error(`yt-dlp version check failed: ${detail}`);
+  const stderr = (err.stderr || "").toString().slice(0, 500);
+  const stdout = (err.stdout || "").toString().slice(0, 200);
+  console.error(`yt-dlp version check failed: ${stderr || stdout || err.message}`);
+}
+
+// Check if ffmpeg is available
+try {
+  execSync("ffmpeg -version 2>&1", { encoding: "utf-8", timeout: 5000 });
+  console.log("ffmpeg: available");
+} catch {
+  console.log("ffmpeg: not found in PATH");
 }
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
