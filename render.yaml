@@ -8,10 +8,15 @@ services:
     startCommand: npm start -w @media/backend
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: "20"
       - key: CORS_ORIGINS
         value: "*"
       - key: MAX_CONCURRENT_DOWNLOADS
         value: "2"
       - key: STORAGE_DIR
         value: /tmp/media-storage
+      # Personal YouTube cookies (Netscape cookies.txt). Mark this as a secret
+      # in the Render dashboard before deploying. The backend writes the value
+      # to /tmp/yt-dlp-cookies.txt on startup and forwards it to yt-dlp.
+      - key: YOUTUBE_COOKIES
+        sync: false

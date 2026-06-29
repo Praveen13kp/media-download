@@ -140,8 +140,6 @@ function isTerminal(state) {
 }
 
 function publicJob(job) {
-  const { process, request, ...rest } = job;
-  const safeRequest = request ? { ...request, cookies: request.cookies ? "[REDACTED]" : null } : request;
-  return { ...rest, request: safeRequest };
+  const { process, ...rest } = job;
+  return rest;
 }
-

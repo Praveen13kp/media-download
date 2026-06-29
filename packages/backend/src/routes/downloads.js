@@ -2,8 +2,7 @@ import path from "node:path";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { createJob, getJob, listJobs, controlJob, retryJob, jobEvents } from "../services/jobs.js";
-import { requireAuth, validateDownloadRequest, extractCookies } from "../services/validation.js";
-import { validateCookieContent } from "../services/cookies.js";
+import { requireAuth, validateDownloadRequest } from "../services/validation.js";
 import { storageDir } from "../services/storage.js";
 
 const uuidRegex = /^[a-f0-9-]{36}$/;
@@ -26,9 +25,7 @@ downloadsRouter.get("/", requireAuth, (_req, res) => {
 downloadsRouter.post("/", createLimiter, requireAuth, (req, res, next) => {
   try {
     validateDownloadRequest(req.body);
-    const cookies = extractCookies(req.body);
-    if (cookies !== null) validateCookieContent(cookies);
-    const job = createJob({ ...req.body, cookies: cookies || null });
+    const job = createJob(req.body);
     res.status(202).json(job);
   } catch (error) {
     next(error);
@@ -100,4 +97,3 @@ downloadsRouter.get("/:id/file", requireAuth, validateId, (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.download(resolved, job.fileName);
 });
-

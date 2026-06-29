@@ -125,10 +125,3 @@ export function validateDownloadRequest(body) {
     }
   }
 }
-
-export function extractCookies(body) {
-  if (!body || body.cookies === undefined || body.cookies === null || body.cookies === "") {
-    return null;
-  }
-  return body.cookies;
-}

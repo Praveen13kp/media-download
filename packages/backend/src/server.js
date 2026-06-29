@@ -10,6 +10,7 @@ import { mediaRouter } from "./routes/media.js";
 import { downloadsRouter } from "./routes/downloads.js";
 import { ensureStorageDir } from "./services/storage.js";
 import { initDb } from "./services/db.js";
+import { ensureServerCookies, deleteCookieFile } from "./services/cookies.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../../..");
@@ -19,6 +20,11 @@ dotenv.config();
 const app = express();
 app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 4000);
+
+// Materialize the server-side personal cookies (YOUTUBE_COOKIES) before any
+// analyze/download requests can be served. Without cookies the API stays in
+// anonymous mode and yt-dlp will hit YouTube's bot detection.
+await ensureServerCookies();
 
 await ensureStorageDir();
 await initDb();
@@ -76,6 +82,15 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Media Download API listening on http://localhost:${port}`);
 });
+
+function shutdown() {
+  deleteCookieFile();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
