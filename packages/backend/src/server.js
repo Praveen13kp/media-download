@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +44,18 @@ app.use("/api/downloads", downloadsRouter);
 app.use("/storage", express.static(path.resolve(__dirname, "../storage")));
 
 const webDist = path.resolve(projectRoot, "apps/web/dist");
-const hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
+let hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
+
+if (!hasWeb) {
+  console.log("Building web UI...");
+  try {
+    execSync("npm run build:web", { cwd: projectRoot, stdio: "inherit", shell: true });
+    hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
+    if (hasWeb) console.log("Web UI built successfully");
+  } catch (err) {
+    console.error("Web UI build failed:", err.message);
+  }
+}
 
 if (hasWeb) {
   console.log(`Serving web UI from ${webDist}`);
@@ -52,10 +64,7 @@ if (hasWeb) {
     res.sendFile(path.join(webDist, "index.html"));
   });
 } else {
-  console.log(`Web dist not found at ${webDist} — serving API only`);
-  app.get("/", (_req, res) => {
-    res.send(`<!DOCTYPE html><html><body><h1>Media Download API</h1><p>API is running. Web UI not built.</p><p>Health: <a href="/health">/health</a></p></body></html>`);
-  });
+  console.log("Web UI not available — serving API only");
 }
 
 app.use((err, _req, res, _next) => {
