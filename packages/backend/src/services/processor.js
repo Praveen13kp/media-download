@@ -33,14 +33,17 @@ export async function analyzeUrl(url) {
     console.error("yt-dlp failed:", err.message);
     throw Object.assign(new Error(err.message), { status: 502 });
   }
+  if (!raw || !raw.trim()) {
+    throw Object.assign(new Error("yt-dlp produced no output"), { status: 502 });
+  }
   let info;
   try {
     info = JSON.parse(raw);
   } catch {
     console.error("=== yt-dlp stdout (first 2000 chars) ===");
-    console.error(raw?.slice(0, 2000));
+    console.error(raw.slice(0, 2000));
     console.error("=== yt-dlp stdout end ===");
-    throw Object.assign(new Error(`yt-dlp returned non-JSON output: ${raw?.slice(0, 200)}`), { status: 502 });
+    throw Object.assign(new Error(`yt-dlp returned non-JSON: ${raw.slice(0, 200)}`), { status: 502 });
   }
   const formats = normalizeFormats(info.formats || []);
 
@@ -260,15 +263,15 @@ function runCommand(command, args, timeoutMs) {
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       if (timedOut) return;
-      if (code === 0) resolve(stdout);
-      else {
-        const msg = stderr.trim() || stdout.trim() || `${command} exited with code ${code}`;
-        console.error(`=== yt-dlp exit code ${code} ===`);
-        if (stderr) console.error("stderr:", stderr.slice(0, 1000));
-        if (stdout) console.error("stdout:", stdout.slice(0, 500));
-        console.error("=== end ===");
-        reject(new Error(msg));
-      }
+      const stderrMsg = stderr.trim();
+      const stdoutMsg = stdout.trim();
+      console.error(`=== yt-dlp exit code ${code} ===`);
+      if (stderrMsg) console.error("stderr:", stderrMsg);
+      if (stdoutMsg) console.error("stdout:", stdoutMsg.slice(0, 500));
+      console.error("=== end ===");
+      if (code === 0 && stdoutMsg) resolve(stdout);
+      else if (code === 0 && !stdoutMsg) reject(new Error(stderrMsg || "yt-dlp produced no output"));
+      else reject(new Error(stderrMsg || stdoutMsg || `${command} exited with code ${code}`));
     });
   });
 }
