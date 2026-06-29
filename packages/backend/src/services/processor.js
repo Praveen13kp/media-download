@@ -1,15 +1,21 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const localYtDlp = path.resolve(__dirname, "../../bin/yt-dlp");
+const YT_DLP = existsSync(localYtDlp) ? localYtDlp : "yt-dlp";
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 
 export async function analyzeUrl(url) {
-  const raw = await runCommand("yt-dlp", ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
+  const raw = await runCommand(YT_DLP, ["--dump-json", "--no-playlist", url], ANALYZE_TIMEOUT_MS);
   let info;
   try {
     info = JSON.parse(raw);
@@ -38,7 +44,7 @@ export function startDownload(job, onUpdate) {
   // Ensure directory exists (handles custom outputDir)
   fs.mkdir(dir, { recursive: true }).catch(() => null);
 
-  const child = spawn("yt-dlp", args, { windowsHide: true });
+  const child = spawn(YT_DLP, args, { windowsHide: true });
 
   job.process = child;
   update(job, { state: DOWNLOAD_STATES.FETCHING }, onUpdate);
