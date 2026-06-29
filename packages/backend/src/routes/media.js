@@ -1,7 +1,8 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { analyzeUrl } from "../services/processor.js";
-import { requireAuth, validateMediaUrl } from "../services/validation.js";
+import { requireAuth, validateMediaUrl, extractCookies } from "../services/validation.js";
+import { validateCookieContent } from "../services/cookies.js";
 
 export const mediaRouter = express.Router();
 
@@ -16,10 +17,11 @@ const analyzeLimiter = rateLimit({
 mediaRouter.post("/analyze", analyzeLimiter, requireAuth, async (req, res, next) => {
   try {
     validateMediaUrl(req.body.url);
-    const result = await analyzeUrl(req.body.url);
+    const cookies = extractCookies(req.body);
+    if (cookies !== null) validateCookieContent(cookies);
+    const result = await analyzeUrl(req.body.url, cookies);
     res.json(result);
   } catch (error) {
     next(error);
   }
 });
-

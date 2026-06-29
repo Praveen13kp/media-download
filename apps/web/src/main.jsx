@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, FileAudio, FileVideo, History, Link, Pause, Play, RotateCcw, Search, Square } from "lucide-react";
+import { Cookie, Download, FileAudio, FileVideo, History, Link, Pause, Play, RotateCcw, Search, Square, Upload, X } from "lucide-react";
 import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
@@ -30,6 +30,8 @@ function App() {
   const [selected, setSelected] = useState({ type: "video", quality: "1080p", format: "mp4" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [cookies, setCookies] = useState("");
+  const [cookiesFileName, setCookiesFileName] = useState("");
 
   useEffect(() => {
     refreshDownloads();
@@ -51,13 +53,35 @@ function App() {
     }
   }
 
+  function setCookiesFromFile(file) {
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      setError("Cookies file is too large (max 256 KB).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCookies(typeof reader.result === "string" ? reader.result : "");
+      setCookiesFileName(file.name);
+    };
+    reader.onerror = () => setError("Failed to read cookies file.");
+    reader.readAsText(file);
+  }
+
+  function clearCookies() {
+    setCookies("");
+    setCookiesFileName("");
+  }
+
   async function analyze() {
     setError("");
     setLoading(true);
     try {
+      const body = { url };
+      if (cookies.trim()) body.cookies = cookies;
       const data = await api("/api/media/analyze", {
         method: "POST",
-        body: JSON.stringify({ url })
+        body: JSON.stringify(body)
       });
       setAnalysis(data);
     } catch (err) {
@@ -71,6 +95,7 @@ function App() {
     setError("");
     try {
       const body = { url, ...selected };
+      if (cookies.trim()) body.cookies = cookies;
       const job = await api("/api/downloads", {
         method: "POST",
         body: JSON.stringify(body)
@@ -132,6 +157,51 @@ function App() {
                 Analyze
               </button>
             </div>
+            <details className="mt-4">
+              <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-600">
+                <Cookie size={16} />
+                YouTube Cookies (optional)
+              </summary>
+              <p className="mt-2 text-xs text-slate-500">
+                Export <code className="rounded bg-slate-100 px-1 py-0.5">cookies.txt</code> from your browser using an extension like
+                {" "}<em>Get cookies.txt LOCALLY</em>, then paste it below or upload the file. Cookies are sent over HTTPS, used only for this request,
+                written to a temporary file for yt-dlp, and deleted immediately. They are never stored or logged.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <textarea
+                  value={cookies}
+                  onChange={(event) => { setCookies(event.target.value); setCookiesFileName(""); }}
+                  placeholder="# Netscape HTTP Cookie File"
+                  rows={5}
+                  className="w-full resize-y rounded-md border border-line bg-slate-50 p-2 font-mono text-xs outline-none focus:border-accent"
+                />
+                <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                  <label className="button small cursor-pointer">
+                    <Upload size={14} />
+                    Upload cookies.txt
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        setCookiesFromFile(file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {cookiesFileName && (
+                    <span className="text-xs text-slate-500">Loaded: {cookiesFileName}</span>
+                  )}
+                  {cookies && (
+                    <button type="button" onClick={clearCookies} className="button small">
+                      <X size={14} />
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </details>
             {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
 

@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
+import { writeCookieFile, deleteCookieFileAsync, deleteCookieFile } from "./cookies.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const binDir = path.resolve(__dirname, "../../bin");
@@ -53,7 +54,8 @@ const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 
-export async function analyzeUrl(url) {
+export async function analyzeUrl(url, cookiesContent) {
+  let cookieFile = null;
   let raw;
   try {
     const args = [
@@ -62,14 +64,24 @@ export async function analyzeUrl(url) {
       "--extractor-retries", EXTRACTOR_RETRIES,
       "--fragment-retries", EXTRACTOR_RETRIES,
       "--user-agent", USER_AGENT,
-      url,
     ];
+    if (cookiesContent) {
+      const written = await writeCookieFile(cookiesContent);
+      cookieFile = written.filePath;
+      args.push("--cookies", cookieFile);
+      console.log(`analyze: using user-provided cookies (file: ${path.basename(cookieFile)})`);
+    } else {
+      console.log("analyze: anonymous mode (no cookies)");
+    }
+    args.push(url);
     raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
   } catch (err) {
     console.error("yt-dlp failed:", err.message);
-    const msg = friendlyError(err.message);
+    if (cookieFile) await deleteCookieFileAsync(cookieFile);
+    const msg = friendlyError(err.message, Boolean(cookiesContent));
     throw Object.assign(new Error(msg), { status: 502 });
   }
+  if (cookieFile) await deleteCookieFileAsync(cookieFile);
   if (!raw || !raw.trim()) {
     throw Object.assign(new Error("yt-dlp produced no output"), { status: 502 });
   }
@@ -96,22 +108,51 @@ export async function analyzeUrl(url) {
   };
 }
 
-export function startDownload(job, onUpdate) {
+export async function startDownload(job, onUpdate) {
   const dir = storageDir(job.request.outputDir);
   const outputTemplate = path.join(dir, `${job.id}-%(title).120s.%(ext)s`);
-  const args = buildYtDlpArgs(job.request, outputTemplate);
+  const cookiesContent = job.request.cookies || null;
+
+  let cookieFile = null;
+  if (cookiesContent) {
+    try {
+      const written = await writeCookieFile(cookiesContent);
+      cookieFile = written.filePath;
+      console.log(`download ${job.id}: using user-provided cookies (file: ${path.basename(cookieFile)})`);
+    } catch (err) {
+      console.error(`download ${job.id}: failed to write cookies, falling back to anonymous mode: ${err.message}`);
+    }
+  } else {
+    console.log(`download ${job.id}: anonymous mode (no cookies)`);
+  }
+  job.request.cookies = null;
+
+  const buildArgs = (cookiePath) => {
+    const args = buildYtDlpArgs(job.request, outputTemplate);
+    if (cookiePath) args.push("--cookies", cookiePath);
+    return args;
+  };
 
   // Ensure directory exists (handles custom outputDir)
   fs.mkdir(dir, { recursive: true }).catch(() => null);
 
-  const child = spawn(resolveYtDlp(), args, { windowsHide: true });
+  const child = spawn(resolveYtDlp(), buildArgs(cookieFile), { windowsHide: true });
 
   job.process = child;
   update(job, { state: DOWNLOAD_STATES.FETCHING }, onUpdate);
 
+  const cleanupCookie = () => {
+    if (cookieFile) {
+      const fp = cookieFile;
+      cookieFile = null;
+      deleteCookieFileAsync(fp).catch(() => null);
+    }
+  };
+
   const timeout = setTimeout(() => {
     if (job.process) {
       job.process.kill();
+      cleanupCookie();
       update(job, { state: DOWNLOAD_STATES.FAILED, error: "Download timed out", process: null }, onUpdate);
     }
   }, DOWNLOAD_TIMEOUT_MS);
@@ -131,11 +172,13 @@ export function startDownload(job, onUpdate) {
 
   child.on("error", (error) => {
     clearTimeout(timeout);
+    cleanupCookie();
     update(job, { state: DOWNLOAD_STATES.FAILED, error: error.message, process: null }, onUpdate);
   });
 
   child.on("close", async (code) => {
     clearTimeout(timeout);
+    cleanupCookie();
     job.process = null;
     if (fileSizeExceeded) return;
     if (job.cancelRequested) {
@@ -147,7 +190,8 @@ export function startDownload(job, onUpdate) {
       return;
     }
     if (code !== 0) {
-      update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}` }, onUpdate);
+      const hint = cookiesContent ? "" : " Try adding your YouTube cookies.";
+      update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}${hint}` }, onUpdate);
       return;
     }
 
@@ -233,9 +277,11 @@ function height(quality) {
   return Number.isFinite(parsed) ? parsed : 1080;
 }
 
-function friendlyError(msg) {
+function friendlyError(msg, hasCookies) {
   if (msg.includes("Sign in to confirm")) {
-    return "YouTube is blocking this request (bot detection). Try a different video or try again later.";
+    return hasCookies
+      ? "YouTube is still blocking this request even with cookies. Your cookies may be expired or from the wrong account. Try refreshing them."
+      : "YouTube is blocking this request (bot detection). Try adding your YouTube cookies.";
   }
   if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
     return "This video is unavailable (private, deleted, or geo-blocked).";
@@ -244,7 +290,9 @@ function friendlyError(msg) {
     return "This is a private video. Only the owner can access it.";
   }
   if (msg.includes("age") || msg.includes("Age")) {
-    return "This video is age-restricted and cannot be accessed without a signed-in account.";
+    return hasCookies
+      ? "This video is age-restricted. Your cookies may be missing age-verification — try refreshing them."
+      : "This video is age-restricted. Try adding your YouTube cookies from an age-verified account.";
   }
   if (msg.includes("Copyright")) {
     return "This video is blocked due to a copyright claim.";
@@ -347,4 +395,3 @@ function runCommand(command, args, timeoutMs) {
     });
   });
 }
-

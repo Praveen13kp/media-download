@@ -120,6 +120,13 @@ function pumpQueue() {
       activeCount = Math.max(0, activeCount - 1);
       setImmediate(pumpQueue);
     }
+  }).catch((error) => {
+    console.error("startDownload failed:", error);
+    activeCount = Math.max(0, activeCount - 1);
+    next.state = DOWNLOAD_STATES.FAILED;
+    next.error = error.message;
+    saveAndEmit(next);
+    setImmediate(pumpQueue);
   });
 }
 
@@ -133,7 +140,8 @@ function isTerminal(state) {
 }
 
 function publicJob(job) {
-  const { process, ...rest } = job;
-  return rest;
+  const { process, request, ...rest } = job;
+  const safeRequest = request ? { ...request, cookies: request.cookies ? "[REDACTED]" : null } : request;
+  return { ...rest, request: safeRequest };
 }
 
