@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -19,7 +19,16 @@ function resolveYtDlp() {
   return "yt-dlp";
 }
 
-console.log(`yt-dlp binary: ${resolveYtDlp()}`);
+const YT_DLP = resolveYtDlp();
+console.log(`yt-dlp binary: ${YT_DLP}`);
+
+try {
+  const ver = execSync(`"${YT_DLP}" --version 2>&1`, { encoding: "utf-8", timeout: 15000, shell: true }).trim();
+  console.log(`yt-dlp version: ${ver}`);
+} catch (err) {
+  const detail = (err.stderr || err.stdout || "").toString().slice(0, 500) || err.message;
+  console.error(`yt-dlp version check failed: ${detail}`);
+}
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
@@ -239,6 +248,8 @@ function update(job, patch, onUpdate) {
 
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
+    const cmdStr = `${command} ${args.slice(0, 2).join(" ")} ... [${args.length} args]`;
+    console.error(`spawning: ${cmdStr}`);
     const child = spawn(command, args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
@@ -257,21 +268,26 @@ function runCommand(command, args, timeoutMs) {
       stderr += chunk;
     });
     child.on("error", (err) => {
+      console.error(`spawn error: ${err.message}`);
       if (timer) clearTimeout(timer);
       reject(err);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (timer) clearTimeout(timer);
       if (timedOut) return;
       const stderrMsg = stderr.trim();
       const stdoutMsg = stdout.trim();
-      console.error(`=== yt-dlp exit code ${code} ===`);
-      if (stderrMsg) console.error("stderr:", stderrMsg);
-      if (stdoutMsg) console.error("stdout:", stdoutMsg.slice(0, 500));
-      console.error("=== end ===");
+      console.error(`=== YTDLP RESULT ===`);
+      console.error(`exit:    ${code}`);
+      console.error(`signal:  ${signal || "none"}`);
+      console.error(`stdout length: ${stdout.length}`);
+      console.error(`stderr length: ${stderr.length}`);
+      if (stderrMsg) console.error(`stderr:\n${stderrMsg}`);
+      if (stdoutMsg) console.error(`stdout:\n${stdoutMsg.slice(0, 1000)}`);
+      console.error(`====================`);
       if (code === 0 && stdoutMsg) resolve(stdout);
       else if (code === 0 && !stdoutMsg) reject(new Error(stderrMsg || "yt-dlp produced no output"));
-      else reject(new Error(stderrMsg || stdoutMsg || `${command} exited with code ${code}`));
+      else reject(new Error(stderrMsg || stdoutMsg || `exit code ${code}`));
     });
   });
 }
