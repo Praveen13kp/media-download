@@ -45,7 +45,7 @@ function App() {
   async function refreshDownloads() {
     try {
       const data = await api("/api/downloads");
-      setDownloads(data.downloads || []);
+      setDownloads(data.downloads || data.data?.downloads || []);
     } catch {
       // The backend may not be running while the UI is being designed.
     }
@@ -59,7 +59,12 @@ function App() {
         method: "POST",
         body: JSON.stringify({ url })
       });
-      setAnalysis(data);
+      if (!data.success) {
+        setError(data.message || data.error || "Analysis failed");
+        setAnalysis(null);
+        return;
+      }
+      setAnalysis(data.data || data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -71,10 +76,15 @@ function App() {
     setError("");
     try {
       const body = { url, ...selected };
-      const job = await api("/api/downloads", {
+      const res = await api("/api/downloads", {
         method: "POST",
         body: JSON.stringify(body)
       });
+      const job = res.data || res;
+      if (!job || !job.id) {
+        setError(res.message || res.error || "Failed to start download");
+        return;
+      }
       setDownloads((current) => [job, ...current]);
       subscribe(job.id);
     } catch (err) {
@@ -108,8 +118,9 @@ function App() {
   }
 
   async function control(id, action) {
-    const job = await api(`/api/downloads/${id}/${action}`, { method: "POST" });
-    setDownloads((current) => current.map((item) => (item.id === id ? job : item)));
+    const res = await api(`/api/downloads/${id}/${action}`, { method: "POST" });
+    const job = res.data || res;
+    setDownloads((current) => current.map((item) => (item.id === id ? { ...item, ...job } : item)));
   }
 
   return (
