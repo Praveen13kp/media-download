@@ -19,7 +19,7 @@ if (process.env.PATH && !process.env.PATH.includes(binDir)) {
 // Configurable extraction options
 const EXTRACTOR_RETRIES = process.env.YT_EXTRACTOR_RETRIES || "3";
 const USER_AGENT = process.env.YT_USER_AGENT || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
-const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || "web,android";
+const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || "mweb,web,android";
 
 function resolveYtDlp() {
   if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
@@ -68,10 +68,24 @@ function cookieArgs() {
   return ["--cookies", cookieFile];
 }
 
-// YouTube-specific extractor arguments to bypass bot detection. Using multiple
-// player clients (especially "android") avoids stricter web checks.
+// YouTube-specific extractor arguments to bypass bot detection and age-gate.
+// `mweb` and `tv_embedded` clients are known to bypass the age restriction
+// prompt with weaker cookie sets. Using multiple clients gives yt-dlp fallback
+// options when one is rejected.
 function extractorArgs() {
   return ["--extractor-args", `youtube:player_client=${YT_PLAYER_CLIENTS}`];
+}
+
+// Extra age-gate bypass flags: force the default fetch to use the age-gate
+// aware player, and disable the YouTube "confirm you're not a bot" interstitial
+// by requesting a player response directly.
+function ageGateArgs() {
+  return [
+    "--extractor-args", "youtube:skip=translated_subs",
+    "--no-check-certificates",
+    "--geo-bypass",
+    "--geo-bypass-country", "IN"
+  ];
 }
 
 const THROTTLED_RATE = process.env.YT_THROTTLED_RATE || "100K";
@@ -82,6 +96,7 @@ function failure(error, message) {
 
 export async function analyzeUrl(url) {
   try {
+    const cookieFile = cookiesEnabled() ? getCookieFilePath() : null;
     const args = [
       "--dump-json", "--no-playlist",
       "--retries", EXTRACTOR_RETRIES,
@@ -90,53 +105,73 @@ export async function analyzeUrl(url) {
       "--user-agent", USER_AGENT,
       "--throttled-rate", THROTTLED_RATE,
       ...extractorArgs(),
-      ...cookieArgs(),
+      ...ageGateArgs(),
+      ...(cookieFile ? ["--cookies", cookieFile] : []),
       url,
     ];
-    if (cookiesEnabled() && cookieArgs().length) {
-      console.log("analyze: using server cookies");
+    if (cookieFile) {
+      console.log(`analyze: using server cookies (file: ${path.basename(cookieFile)}, exists: ${existsSync(cookieFile)})`);
     } else {
       console.log("analyze: anonymous mode (no cookies)");
     }
     const raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
 
     if (!raw || !raw.trim()) {
-      console.error("analyzeUrl: yt-dlp produced no output");
+      // Retry with a more permissive client (mweb is known to bypass age-gate).
+      console.warn("analyzeUrl: empty output, retrying with mweb/tv_embedded clients");
+      const retryArgs = args.map((a) => {
+        if (a.startsWith("youtube:player_client=")) {
+          return "youtube:player_client=mweb,web_safari,android";
+        }
+        return a;
+      });
+      try {
+        const rawRetry = await runCommand(resolveYtDlp(), retryArgs, ANALYZE_TIMEOUT_MS);
+        if (rawRetry && rawRetry.trim()) {
+          return parseAnalyzeOutput(url, rawRetry);
+        }
+      } catch (retryErr) {
+        console.error("analyzeUrl retry also failed:", retryErr?.message || retryErr);
+      }
       return failure("yt-dlp produced no output", "Video not accessible — please try again.");
     }
 
-    let info;
-    try {
-      info = JSON.parse(raw);
-    } catch {
-      console.error("=== yt-dlp returned non-JSON (first 2000 chars) ===");
-      console.error(raw.slice(0, 2000));
-      console.error("=== end ===");
-      return failure("yt-dlp returned non-JSON output", "Video not accessible — please try again.");
-    }
-
-    const formats = normalizeFormats(info.formats || []);
-    if (formats.length === 0) {
-      return failure("No video formats found", "Video not accessible.");
-    }
-
-    return {
-      success: true,
-      data: {
-        url,
-        title: info.title,
-        thumbnail: info.thumbnail,
-        duration: info.duration,
-        uploader: info.uploader,
-        formats,
-        videoQualities: [...new Set(formats.filter((format) => format.hasVideo).map((format) => format.qualityLabel))].filter(Boolean),
-        audioFormats: [...new Set(formats.filter((format) => format.hasAudio).map((format) => format.ext))].filter(Boolean)
-      }
-    };
+    return parseAnalyzeOutput(url, raw);
   } catch (err) {
     console.error("analyzeUrl caught error:", err?.message || err);
     return failure(err?.message || "unknown error", friendlyError(err?.message || "unknown error", cookiesEnabled()));
   }
+}
+
+function parseAnalyzeOutput(url, raw) {
+  let info;
+  try {
+    info = JSON.parse(raw);
+  } catch {
+    console.error("=== yt-dlp returned non-JSON (first 2000 chars) ===");
+    console.error(raw.slice(0, 2000));
+    console.error("=== end ===");
+    return failure("yt-dlp returned non-JSON output", "Video not accessible — please try again.");
+  }
+
+  const formats = normalizeFormats(info.formats || []);
+  if (formats.length === 0) {
+    return failure("No video formats found", "Video not accessible.");
+  }
+
+  return {
+    success: true,
+    data: {
+      url,
+      title: info.title,
+      thumbnail: info.thumbnail,
+      duration: info.duration,
+      uploader: info.uploader,
+      formats,
+      videoQualities: [...new Set(formats.filter((format) => format.hasVideo).map((format) => format.qualityLabel))].filter(Boolean),
+      audioFormats: [...new Set(formats.filter((format) => format.hasAudio).map((format) => format.ext))].filter(Boolean)
+    }
+  };
 }
 
 export function startDownload(job, onUpdate) {
