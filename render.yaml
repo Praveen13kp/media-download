@@ -20,3 +20,7 @@ services:
       # to /tmp/yt-dlp-cookies.txt on startup and forwards it to yt-dlp.
       - key: YOUTUBE_COOKIES
         sync: false
+      # YouTube extractor: player clients used to bypass bot detection
+      # (web, android, web_safari, android_music, tv)
+      - key: YT_PLAYER_CLIENTS
+        value: web,android

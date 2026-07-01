@@ -146,6 +146,7 @@ function App() {
 
         <aside className="space-y-6">
           <DownloadQueue downloads={downloads} control={control} apiBase={API_BASE} token={API_TOKEN} />
+          <CookieManager />
           <HistoryPanel downloads={downloads} apiBase={API_BASE} token={API_TOKEN} />
         </aside>
       </div>
@@ -310,6 +311,80 @@ function HistoryPanel({ downloads, apiBase, token }) {
           </a>
         ))}
       </div>
+    </section>
+  );
+}
+
+function CookieManager() {
+  const [expanded, setExpanded] = useState(false);
+  const [cookiesText, setCookiesText] = useState("");
+  const [status, setStatus] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function refreshStatus() {
+    try {
+      const data = await api("/api/cookies/status");
+      setStatus(data.data);
+    } catch {
+      setStatus(null);
+    }
+  }
+
+  useEffect(() => {
+    if (expanded) refreshStatus();
+  }, [expanded]);
+
+  async function handleSave() {
+    setMessage("");
+    setSaving(true);
+    try {
+      await api("/api/cookies/update", {
+        method: "POST",
+        body: JSON.stringify({ cookies: cookiesText })
+      });
+      setMessage("Cookies updated successfully!");
+      setCookiesText("");
+      await refreshStatus();
+    } catch (err) {
+      setMessage(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+      <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center gap-2 text-left">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Cookies</span>
+        <span className={`ml-auto text-xs ${status?.configured ? "text-green-600" : "text-amber-600"}`}>
+          {status?.configured ? "Configured" : "Not configured"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {status && (
+            <div className="rounded bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <p>Cookie file: {status.fileExists ? `${(status.size / 1024).toFixed(1)} KB` : "missing"}</p>
+              {status.sampleDomain && <p>Domain: {status.sampleDomain}</p>}
+            </div>
+          )}
+          <p className="text-xs text-slate-500">
+            Export cookies from your browser (Netscape format) using an extension like "Get cookies.txt" for Chrome/Firefox, or use yt-dlp itself with the --cookies-from-browser flag.
+          </p>
+          <textarea
+            value={cookiesText}
+            onChange={(e) => setCookiesText(e.target.value)}
+            placeholder="Paste Netscape cookies.txt content here..."
+            rows={6}
+            className="w-full rounded-md border border-line bg-white px-3 py-2 text-xs font-mono outline-none resize-y"
+          />
+          <button onClick={handleSave} disabled={!cookiesText || saving} className="button primary text-xs">
+            {saving ? "Saving..." : "Update Cookies"}
+          </button>
+          {message && <p className={`text-xs ${message.startsWith("Error") ? "text-red-600" : "text-green-600"}`}>{message}</p>}
+        </div>
+      )}
     </section>
   );
 }

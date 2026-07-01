@@ -19,6 +19,7 @@ if (process.env.PATH && !process.env.PATH.includes(binDir)) {
 // Configurable extraction options
 const EXTRACTOR_RETRIES = process.env.YT_EXTRACTOR_RETRIES || "3";
 const USER_AGENT = process.env.YT_USER_AGENT || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || "web,android";
 
 function resolveYtDlp() {
   if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
@@ -42,12 +43,15 @@ try {
   console.error(`yt-dlp version check failed: ${stderr || stdout || err.message}`);
 }
 
-// Check if ffmpeg is available
+// Check if ffmpeg is available (degrade gracefully if missing — yt-dlp will
+// fall back to a single stream when post-processing is not possible).
+let ffmpegAvailable = false;
 try {
   execSync("ffmpeg -version 2>&1", { encoding: "utf-8", timeout: 5000 });
+  ffmpegAvailable = true;
   console.log("ffmpeg: available");
 } catch {
-  console.log("ffmpeg: not found in PATH");
+  console.log("ffmpeg: not found in PATH — degraded mode (no merging/post-processing)");
 }
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
@@ -64,8 +68,19 @@ function cookieArgs() {
   return ["--cookies", cookieFile];
 }
 
+// YouTube-specific extractor arguments to bypass bot detection. Using multiple
+// player clients (especially "android") avoids stricter web checks.
+function extractorArgs() {
+  return ["--extractor-args", `youtube:player_client=${YT_PLAYER_CLIENTS}`];
+}
+
+const THROTTLED_RATE = process.env.YT_THROTTLED_RATE || "100K";
+
+function failure(error, message) {
+  return { success: false, error, message };
+}
+
 export async function analyzeUrl(url) {
-  let raw;
   try {
     const args = [
       "--dump-json", "--no-playlist",
@@ -73,6 +88,8 @@ export async function analyzeUrl(url) {
       "--extractor-retries", EXTRACTOR_RETRIES,
       "--fragment-retries", EXTRACTOR_RETRIES,
       "--user-agent", USER_AGENT,
+      "--throttled-rate", THROTTLED_RATE,
+      ...extractorArgs(),
       ...cookieArgs(),
       url,
     ];
@@ -81,36 +98,45 @@ export async function analyzeUrl(url) {
     } else {
       console.log("analyze: anonymous mode (no cookies)");
     }
-    raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
-  } catch (err) {
-    console.error("yt-dlp failed:", err.message);
-    const msg = friendlyError(err.message, cookiesEnabled());
-    throw Object.assign(new Error(msg), { status: 502 });
-  }
-  if (!raw || !raw.trim()) {
-    throw Object.assign(new Error("yt-dlp produced no output"), { status: 502 });
-  }
-  let info;
-  try {
-    info = JSON.parse(raw);
-  } catch {
-    console.error("=== yt-dlp stdout (first 2000 chars) ===");
-    console.error(raw.slice(0, 2000));
-    console.error("=== yt-dlp stdout end ===");
-    throw Object.assign(new Error(`yt-dlp returned non-JSON: ${raw.slice(0, 200)}`), { status: 502 });
-  }
-  const formats = normalizeFormats(info.formats || []);
+    const raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
 
-  return {
-    url,
-    title: info.title,
-    thumbnail: info.thumbnail,
-    duration: info.duration,
-    uploader: info.uploader,
-    formats,
-    videoQualities: [...new Set(formats.filter((format) => format.hasVideo).map((format) => format.qualityLabel))].filter(Boolean),
-    audioFormats: [...new Set(formats.filter((format) => format.hasAudio).map((format) => format.ext))].filter(Boolean)
-  };
+    if (!raw || !raw.trim()) {
+      console.error("analyzeUrl: yt-dlp produced no output");
+      return failure("yt-dlp produced no output", "Video not accessible — please try again.");
+    }
+
+    let info;
+    try {
+      info = JSON.parse(raw);
+    } catch {
+      console.error("=== yt-dlp returned non-JSON (first 2000 chars) ===");
+      console.error(raw.slice(0, 2000));
+      console.error("=== end ===");
+      return failure("yt-dlp returned non-JSON output", "Video not accessible — please try again.");
+    }
+
+    const formats = normalizeFormats(info.formats || []);
+    if (formats.length === 0) {
+      return failure("No video formats found", "Video not accessible.");
+    }
+
+    return {
+      success: true,
+      data: {
+        url,
+        title: info.title,
+        thumbnail: info.thumbnail,
+        duration: info.duration,
+        uploader: info.uploader,
+        formats,
+        videoQualities: [...new Set(formats.filter((format) => format.hasVideo).map((format) => format.qualityLabel))].filter(Boolean),
+        audioFormats: [...new Set(formats.filter((format) => format.hasAudio).map((format) => format.ext))].filter(Boolean)
+      }
+    };
+  } catch (err) {
+    console.error("analyzeUrl caught error:", err?.message || err);
+    return failure(err?.message || "unknown error", friendlyError(err?.message || "unknown error", cookiesEnabled()));
+  }
 }
 
 export function startDownload(job, onUpdate) {
@@ -128,6 +154,8 @@ export function startDownload(job, onUpdate) {
 
   const args = buildYtDlpArgs({ ...job.request, url: job.request.url }, outputTemplate);
   for (const arg of cookieArgs()) args.push(arg);
+  args.push("--throttled-rate", THROTTLED_RATE);
+  args.push(...extractorArgs());
 
   const child = spawn(resolveYtDlp(), args, { windowsHide: true });
 
@@ -172,8 +200,10 @@ export function startDownload(job, onUpdate) {
       return;
     }
     if (code !== 0) {
-      const hint = cookiesActive ? "" : " Try adding your YouTube cookies.";
-      update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}${hint}` }, onUpdate);
+      const hint = cookiesActive
+        ? " Your server cookies may have expired — try refreshing them."
+        : " YouTube may be blocking the request (server cookies not configured).";
+      update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}.${hint}` }, onUpdate);
       return;
     }
 
@@ -260,10 +290,11 @@ function height(quality) {
 }
 
 function friendlyError(msg, hasCookies) {
+  if (!msg || typeof msg !== "string") return "Video not accessible — please try again.";
   if (msg.includes("Sign in to confirm")) {
     return hasCookies
       ? "YouTube is still blocking this request even with cookies. Your server cookies may be expired or from the wrong account. Try refreshing them."
-      : "YouTube is blocking this request (bot detection). Try adding your YouTube cookies.";
+      : "YouTube is blocking this request (bot detection).";
   }
   if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
     return "This video is unavailable (private, deleted, or geo-blocked).";
@@ -271,18 +302,24 @@ function friendlyError(msg, hasCookies) {
   if (msg.includes("Private video")) {
     return "This is a private video. Only the owner can access it.";
   }
-  if (msg.includes("age") || msg.includes("Age")) {
+  if (msg.includes("age") || msg.includes("Age") || msg.includes("age-restricted") || msg.includes("age restricted")) {
     return hasCookies
-      ? "This video is age-restricted. Your server cookies may be missing age-verification — try refreshing them."
-      : "This video is age-restricted. Try adding your YouTube cookies from an age-verified account.";
+      ? "This video requires a logged-in session. Your server cookies may be missing age-verification — try refreshing them."
+      : "This video requires logged-in session.";
+  }
+  if (msg.includes("No video formats found") || msg.includes("no video formats") || msg.includes("Requested format is not available")) {
+    return "Video not accessible.";
   }
   if (msg.includes("Copyright")) {
     return "This video is blocked due to a copyright claim.";
   }
-  if (msg.includes("HTTP Error") || msg.includes("Connection")) {
+  if (msg.includes("HTTP Error") || msg.includes("Connection") || msg.includes("Network")) {
     return "Network error when contacting the video platform. Try again later.";
   }
-  return msg;
+  if (msg.includes("Command timed out")) {
+    return "The request took too long. Try again.";
+  }
+  return "Video not accessible — please try again.";
 }
 
 function normalizeFormats(formats) {
@@ -334,8 +371,10 @@ function update(job, patch, onUpdate) {
 
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const cmdStr = `${command} ${args.slice(0, 2).join(" ")} ... [${args.length} args]`;
-    console.error(`spawning: ${cmdStr}`);
+    console.log("YT-DLP COMMAND START");
+    console.log("  command:", command);
+    console.log("  args:", args.join(" "));
+    console.log("  timeoutMs:", timeoutMs);
     const child = spawn(command, args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
@@ -354,7 +393,7 @@ function runCommand(command, args, timeoutMs) {
       stderr += chunk;
     });
     child.on("error", (err) => {
-      console.error(`spawn error: ${err.message}`);
+      console.error("YT-DLP spawn error:", err.message);
       if (timer) clearTimeout(timer);
       reject(err);
     });
@@ -363,14 +402,11 @@ function runCommand(command, args, timeoutMs) {
       if (timedOut) return;
       const stderrMsg = stderr.trim();
       const stdoutMsg = stdout.trim();
-      console.error(`=== YTDLP RESULT ===`);
-      console.error(`exit:    ${code}`);
-      console.error(`signal:  ${signal || "none"}`);
-      console.error(`stdout length: ${stdout.length}`);
-      console.error(`stderr length: ${stderr.length}`);
-      if (stderrMsg) console.error(`stderr:\n${stderrMsg}`);
-      if (stdoutMsg) console.error(`stdout:\n${stdoutMsg.slice(0, 1000)}`);
-      console.error(`====================`);
+      console.log("YT-DLP COMMAND END");
+      console.log("  exitCode:", code);
+      console.log("  signal:", signal || "none");
+      console.log("  stdout:", stdoutMsg || "(empty)");
+      console.log("  stderr:", stderrMsg || "(empty)");
       if (code === 0 && stdoutMsg) resolve(stdout);
       else if (code === 0 && !stdoutMsg) reject(new Error(stderrMsg || "yt-dlp produced no output"));
       else reject(new Error(stderrMsg || stdoutMsg || `exit code ${code}`));

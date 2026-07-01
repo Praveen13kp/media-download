@@ -1,0 +1,15 @@
+yt-dlp binary: yt-dlp
+yt-dlp version: 2026.06.09
+ffmpeg: available
+Serving web UI from C:\Project\apps\web\dist
+Media Download API listening on http://localhost:4569
+analyze: anonymous mode (no cookies)
+YT-DLP COMMAND START
+  command: yt-dlp
+  args: --dump-json --no-playlist --retries 3 --extractor-retries 3 --fragment-retries 3 --user-agent Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 https://www.youtube.com/watch?v=NOPE
+  timeoutMs: 30000
+YT-DLP COMMAND END
+  exitCode: 1
+  signal: none
+  stdout: (empty)
+  stderr: ERROR: [youtube:truncated_id] NOPE: Incomplete YouTube ID NOPE. URL https://www.youtube.com/watch?v=NOPE looks truncated.

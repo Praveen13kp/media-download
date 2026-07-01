@@ -8,9 +8,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mediaRouter } from "./routes/media.js";
 import { downloadsRouter } from "./routes/downloads.js";
+import { cookiesRouter } from "./routes/cookies.js";
 import { ensureStorageDir } from "./services/storage.js";
 import { initDb } from "./services/db.js";
 import { ensureServerCookies, deleteCookieFile } from "./services/cookies.js";
+
+// Global safety nets: log and continue so a stray async rejection (e.g. from a
+// yt-dlp spawn that races shutdown) does not tear down the long-lived Node
+// process. Without these, Node 20+ will exit on an unhandled promise rejection.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason && reason.message ? reason.message : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err && err.message ? err.message : err);
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../../..");
@@ -48,6 +59,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/api/media", mediaRouter);
 app.use("/api/downloads", downloadsRouter);
+app.use("/api/cookies", cookiesRouter);
 app.use("/storage", express.static(path.resolve(__dirname, "../storage")));
 
 const webDist = path.resolve(projectRoot, "apps/web/dist");
@@ -77,8 +89,11 @@ if (hasWeb) {
 app.use((err, _req, res, _next) => {
   console.error(err);
   const status = err.status || 500;
+  const message = status === 500 ? "Internal server error" : err.message;
   res.status(status).json({
-    error: status === 500 ? "Internal server error" : err.message
+    success: false,
+    error: message,
+    message
   });
 });
 
