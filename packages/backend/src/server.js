@@ -63,10 +63,11 @@ app.use("/api/cookies", cookiesRouter);
 app.use("/storage", express.static(path.resolve(__dirname, "../storage")));
 
 const webDist = path.resolve(projectRoot, "apps/web/dist");
-let hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
+const forceWebBuild = process.env.FORCE_WEB_BUILD === "1" || process.env.NODE_ENV !== "production";
+let hasWeb = !forceWebBuild && await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
 
 if (!hasWeb) {
-  console.log("Building web UI...");
+  console.log(forceWebBuild ? "Building web UI (FORCE_WEB_BUILD=1)..." : "Building web UI...");
   try {
     execSync("npm run build:web", { cwd: projectRoot, stdio: "inherit", shell: true });
     hasWeb = await fs.promises.stat(path.join(webDist, "index.html")).then(() => true).catch(() => false);
