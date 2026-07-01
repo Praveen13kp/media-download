@@ -174,12 +174,20 @@ function ResultPanel({ analysis, selected, setSelected, qualities, startDownload
     );
   }
 
+  const title = analysis.title ?? "Untitled";
+  const thumbnail = analysis.thumbnail ?? null;
+  const formats = Array.isArray(analysis.formats) ? analysis.formats : [];
+
   return (
     <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
       <div className="grid gap-5 md:grid-cols-[240px_minmax(0,1fr)]">
-        <img src={analysis.thumbnail} alt="" className="aspect-video w-full rounded-md bg-slate-100 object-cover" />
+        {thumbnail ? (
+          <img src={thumbnail} alt="" className="aspect-video w-full rounded-md bg-slate-100 object-cover" />
+        ) : (
+          <div className="aspect-video w-full rounded-md bg-slate-100" />
+        )}
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">{analysis.title}</h1>
+          <h1 className="text-xl font-semibold">{title}</h1>
           <p className="mt-1 text-sm text-slate-500">{formatDuration(analysis.duration)}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <Selector
@@ -215,28 +223,30 @@ function ResultPanel({ analysis, selected, setSelected, qualities, startDownload
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-md border border-line">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="px-3 py-2">Quality</th>
-              <th className="px-3 py-2">Format</th>
-              <th className="px-3 py-2">Type</th>
-              <th className="px-3 py-2">Size</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analysis.formats.slice(0, 12).map((format) => (
-              <tr key={format.id} className="border-t border-line">
-                <td className="px-3 py-2">{format.qualityLabel}</td>
-                <td className="px-3 py-2">{format.ext}</td>
-                <td className="px-3 py-2">{format.hasVideo && format.hasAudio ? "Video + Audio" : format.hasVideo ? "Video" : "Audio"}</td>
-                <td className="px-3 py-2">{formatBytes(format.size)}</td>
+      {formats.length > 0 && (
+        <div className="mt-6 overflow-hidden rounded-md border border-line">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="px-3 py-2">Quality</th>
+                <th className="px-3 py-2">Format</th>
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Size</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {formats.slice(0, 12).map((format) => (
+                <tr key={format.id} className="border-t border-line">
+                  <td className="px-3 py-2">{format.qualityLabel}</td>
+                  <td className="px-3 py-2">{format.ext}</td>
+                  <td className="px-3 py-2">{format.hasVideo && format.hasAudio ? "Video + Audio" : format.hasVideo ? "Video" : "Audio"}</td>
+                  <td className="px-3 py-2">{formatBytes(format.size)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

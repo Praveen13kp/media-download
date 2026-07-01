@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DOWNLOAD_STATES } from "@media/shared";
 import { safeFileName, storageDir } from "./storage.js";
 import { getCookieFilePath, cookiesEnabled } from "./cookies.js";
+import { getProxy, getDifferentProxy, hasProxy } from "./proxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const binDir = path.resolve(__dirname, "../../bin");
@@ -80,6 +81,13 @@ function cookieArgs() {
   return ["--cookies", cookieFile];
 }
 
+// Returns ["--proxy", "<url>"] when a proxy URL is provided, otherwise [].
+// Proxy credentials are never logged.
+function proxyArgs(proxy) {
+  if (!proxy) return [];
+  return ["--proxy", proxy];
+}
+
 // YouTube-specific extractor arguments to bypass bot detection and age-gate.
 // `mweb` and `tv_embedded` clients are known to bypass the age restriction
 // prompt with weaker cookie sets. Using multiple clients gives yt-dlp fallback
@@ -124,9 +132,12 @@ export async function analyzeUrl(url) {
     console.log("analyze: anonymous mode (no cookies)");
   }
 
-  // --skip-download: we only want metadata, not the media itself. This also
-  // avoids the "Requested format is not available" error class because we
-  // never ask yt-dlp to pick a format to download.
+  const proxyConfigured = hasProxy();
+  if (proxyConfigured) {
+    console.log("analyze: proxy routing enabled");
+  }
+
+  // --skip-download: we only want metadata, not the media itself.
   const baseArgs = [
     "--dump-json", "--no-playlist", "--skip-download",
     "--retries", EXTRACTOR_RETRIES,
@@ -138,35 +149,49 @@ export async function analyzeUrl(url) {
     ...(cookieFile ? ["--cookies", cookieFile] : []),
   ];
 
-  // First attempt: primary client (defaults to android). If YouTube returns
-  // a 429, n-challenge failure, or any extractor error, fall back to a
-  // secondary client set (defaults to web). Either way, never throw to the
-  // caller — return a structured { success, error?, message? } envelope.
-  const attempts = [YT_PLAYER_CLIENTS, YT_FALLBACK_PLAYER_CLIENTS].filter(
-    (c, i, arr) => c && arr.indexOf(c) === i
-  );
+  // Build attempt list:
+  //   • If proxy is configured: 3 proxy attempts (rotating proxies), using
+  //     primary client for all of them.
+  //   • If no proxy: 2 client-based attempts (primary → fallback), which is
+  //     the existing behaviour.
+  let attemptList;
+  if (proxyConfigured) {
+    // Pick 3 proxies up front (best-effort distinct selection).
+    const p1 = getProxy();
+    const p2 = getDifferentProxy(p1);
+    const p3 = getDifferentProxy(p2);
+    attemptList = [
+      { clients: YT_PLAYER_CLIENTS, proxy: p1 },
+      { clients: YT_PLAYER_CLIENTS, proxy: p2 },
+      { clients: YT_PLAYER_CLIENTS, proxy: p3 },
+    ];
+  } else {
+    const clients = [YT_PLAYER_CLIENTS, YT_FALLBACK_PLAYER_CLIENTS].filter(
+      (c, i, arr) => c && arr.indexOf(c) === i
+    );
+    attemptList = clients.map((c) => ({ clients: c, proxy: null }));
+  }
 
   let lastError = null;
-  for (let i = 0; i < attempts.length; i++) {
-    const clients = attempts[i];
+  for (let i = 0; i < attemptList.length; i++) {
+    const { clients, proxy } = attemptList[i];
     const args = [
       ...baseArgs,
       ...extractorArgs(clients),
       ...ageGateArgs(),
+      ...proxyArgs(proxy),
       url,
     ];
     if (i === 0) {
-      console.log(`analyze: trying primary client(s): ${clients}`);
+      console.log(`analyze: attempt ${i + 1} — client(s): ${clients}${proxy ? " [proxy]" : ""}`);
     } else {
-      console.log(`analyze: falling back to client(s): ${clients}`);
+      console.log(`analyze: attempt ${i + 1} (retry) — client(s): ${clients}${proxy ? " [proxy]" : ""}`);
     }
     try {
       const raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
       if (raw && raw.trim()) {
         const parsed = parseAnalyzeOutput(url, raw);
         if (parsed.success) return parsed;
-        // Parsing failed (e.g. non-JSON); remember the error and try the
-        // fallback client.
         lastError = new Error(parsed.error || "parse failed");
       } else {
         lastError = new Error("yt-dlp produced no output");
@@ -174,20 +199,26 @@ export async function analyzeUrl(url) {
     } catch (err) {
       const msg = (err?.message || String(err)).toString();
       lastError = err;
-      console.error(`analyze: client "${clients}" failed: ${msg.slice(0, 300)}`);
-      // If this was a YouTube block (429 / n-challenge / PO token), don't
-      // bother trying the fallback — the fallback will fail for the same
-      // reason. Return the friendly message immediately.
+      console.error(`analyze: attempt ${i + 1} failed: ${msg.slice(0, 300)}`);
+
       if (isYouTubeBlock(msg)) {
-        const message = "YouTube temporarily blocked this server. Try again later.";
-        return failure("youtube-blocked", message);
+        if (proxyConfigured && i < attemptList.length - 1) {
+          // With proxy we rotate — try the next proxy instead of giving up.
+          console.log("analyze: YouTube block detected — rotating proxy for next attempt");
+          continue;
+        }
+        // No proxy, or all proxy attempts exhausted.
+        return failure("youtube-blocked", friendlyYouTubeBlock(msg));
       }
-      // Otherwise, continue to the next fallback client.
+      // Non-block error: if proxy configured keep rotating, otherwise try next client.
     }
   }
 
-  // All attempts failed.
+  // All attempts exhausted.
   const finalMsg = lastError?.message || "unknown error";
+  if (isYouTubeBlock(finalMsg)) {
+    return failure("youtube-blocked", friendlyYouTubeBlock(finalMsg));
+  }
   return failure(finalMsg, friendlyError(finalMsg, cookiesEnabled()));
 }
 
@@ -205,6 +236,27 @@ function isYouTubeBlock(msg) {
     msg.includes("PO token") ||
     msg.includes("Sign in to confirm")
   );
+}
+
+/**
+ * Returns a specific friendly message for YouTube blocks, distinguishing
+ * between 429 rate-limits, PO-token failures, and generic blocks.
+ * Proxy-specific messaging is included when a proxy is configured.
+ */
+function friendlyYouTubeBlock(msg) {
+  const proxyNote = hasProxy()
+    ? "YouTube temporarily blocked this route. Try another proxy."
+    : "YouTube temporarily blocked this server. Try again later.";
+
+  if (
+    msg.includes("PO Token") ||
+    msg.includes("PO token")
+  ) {
+    return hasProxy()
+      ? "YouTube extraction requires another route. Try a different proxy."
+      : "YouTube extraction requires a verified session (PO Token missing). Try again later.";
+  }
+  return proxyNote;
 }
 
 function parseAnalyzeOutput(url, raw) {
@@ -258,6 +310,14 @@ export function startDownload(job, onUpdate) {
   args.push("--throttled-rate", THROTTLED_RATE);
   args.push(...sleepArgs());
   args.push(...extractorArgs());
+
+  // Inject proxy if configured. A fresh proxy is chosen per download so that
+  // concurrent downloads spread across the proxy pool.
+  const proxy = getProxy();
+  if (proxy) {
+    console.log(`download ${job.id}: proxy routing enabled`);
+    args.push(...proxyArgs(proxy));
+  }
 
   const child = spawn(resolveYtDlp(), args, { windowsHide: true });
 
@@ -315,7 +375,7 @@ export function startDownload(job, onUpdate) {
       const stderr = (job.lastStderr || "").toString();
       let friendly;
       if (isYouTubeBlock(stderr)) {
-        friendly = "YouTube temporarily blocked this server. Try again later.";
+        friendly = friendlyYouTubeBlock(stderr);
       } else {
         const hint = cookiesActive
           ? " Your server cookies may have expired — try refreshing them."
@@ -412,11 +472,9 @@ function friendlyError(msg, hasCookies) {
   if (!msg || typeof msg !== "string") return "Video not accessible — please try again.";
 
   // YouTube is actively blocking this server. Covers HTTP 429 rate limits,
-  // n-challenge solver failures, and missing PO token. All three are IP-level
-  // throttles — neither cookies nor a client change will help in the short
-  // term, so we surface a single, calm message.
+  // n-challenge solver failures, and missing PO token.
   if (isYouTubeBlock(msg)) {
-    return "YouTube temporarily blocked this server. Try again later.";
+    return friendlyYouTubeBlock(msg);
   }
 
   if (msg.includes("Sign in to confirm")) {
