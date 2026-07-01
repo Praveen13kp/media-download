@@ -19,7 +19,12 @@ if (process.env.PATH && !process.env.PATH.includes(binDir)) {
 // Configurable extraction options
 const EXTRACTOR_RETRIES = process.env.YT_EXTRACTOR_RETRIES || "3";
 const USER_AGENT = process.env.YT_USER_AGENT || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
-const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || "mweb,web,android";
+// Use a single, safe default client. mweb/tv_embedded are increasingly rejected
+// by YouTube's bot detection (HTTP 429, n-challenge failures). `android` is the
+// most reliable default as of late 2025/early 2026; we fall back to `web` if
+// android fails. Override via YT_PLAYER_CLIENTS if needed.
+const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || "android";
+const YT_FALLBACK_PLAYER_CLIENTS = process.env.YT_FALLBACK_PLAYER_CLIENTS || "web";
 
 function resolveYtDlp() {
   if (process.env.YT_DLP_PATH && existsSync(process.env.YT_DLP_PATH)) {
@@ -54,9 +59,16 @@ try {
   console.log("ffmpeg: not found in PATH — degraded mode (no merging/post-processing)");
 }
 
-const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 30_000);
+const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 60_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS || 600_000);
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
+
+// Sleep between yt-dlp HTTP requests. YouTube rate-limits aggressive
+// extractors (HTTP 429) and may fail the n-challenge. Spacing requests out
+// keeps the server's IP out of the throttle window.
+const SLEEP_INTERVAL = process.env.YT_SLEEP_INTERVAL || "2";
+const MAX_SLEEP_INTERVAL = process.env.YT_MAX_SLEEP_INTERVAL || "5";
+const SLEEP_REQUESTS = process.env.YT_SLEEP_REQUESTS || "1";
 
 // Server-side personal cookies (YOUTUBE_COOKIES env var) are optional.
 // When present, the cookies service materializes a temp cookies file at a
@@ -72,8 +84,18 @@ function cookieArgs() {
 // `mweb` and `tv_embedded` clients are known to bypass the age restriction
 // prompt with weaker cookie sets. Using multiple clients gives yt-dlp fallback
 // options when one is rejected.
-function extractorArgs() {
-  return ["--extractor-args", `youtube:player_client=${YT_PLAYER_CLIENTS}`];
+function extractorArgs(clients = YT_PLAYER_CLIENTS) {
+  return ["--extractor-args", `youtube:player_client=${clients}`];
+}
+
+// Sleep flags — space out HTTP requests so YouTube doesn't rate-limit us
+// (HTTP 429) and the n-challenge solver has time to finish.
+function sleepArgs() {
+  return [
+    "--sleep-interval", SLEEP_INTERVAL,
+    "--max-sleep-interval", MAX_SLEEP_INTERVAL,
+    "--sleep-requests", SLEEP_REQUESTS,
+  ];
 }
 
 // Extra age-gate bypass flags: force the default fetch to use the age-gate
@@ -95,52 +117,94 @@ function failure(error, message) {
 }
 
 export async function analyzeUrl(url) {
-  try {
-    const cookieFile = cookiesEnabled() ? getCookieFilePath() : null;
+  const cookieFile = cookiesEnabled() ? getCookieFilePath() : null;
+  if (cookieFile) {
+    console.log(`analyze: using server cookies (file: ${path.basename(cookieFile)}, exists: ${existsSync(cookieFile)})`);
+  } else {
+    console.log("analyze: anonymous mode (no cookies)");
+  }
+
+  // --skip-download: we only want metadata, not the media itself. This also
+  // avoids the "Requested format is not available" error class because we
+  // never ask yt-dlp to pick a format to download.
+  const baseArgs = [
+    "--dump-json", "--no-playlist", "--skip-download",
+    "--retries", EXTRACTOR_RETRIES,
+    "--extractor-retries", EXTRACTOR_RETRIES,
+    "--fragment-retries", EXTRACTOR_RETRIES,
+    "--user-agent", USER_AGENT,
+    "--throttled-rate", THROTTLED_RATE,
+    ...sleepArgs(),
+    ...(cookieFile ? ["--cookies", cookieFile] : []),
+  ];
+
+  // First attempt: primary client (defaults to android). If YouTube returns
+  // a 429, n-challenge failure, or any extractor error, fall back to a
+  // secondary client set (defaults to web). Either way, never throw to the
+  // caller — return a structured { success, error?, message? } envelope.
+  const attempts = [YT_PLAYER_CLIENTS, YT_FALLBACK_PLAYER_CLIENTS].filter(
+    (c, i, arr) => c && arr.indexOf(c) === i
+  );
+
+  let lastError = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const clients = attempts[i];
     const args = [
-      "--dump-json", "--no-playlist",
-      "--retries", EXTRACTOR_RETRIES,
-      "--extractor-retries", EXTRACTOR_RETRIES,
-      "--fragment-retries", EXTRACTOR_RETRIES,
-      "--user-agent", USER_AGENT,
-      "--throttled-rate", THROTTLED_RATE,
-      ...extractorArgs(),
+      ...baseArgs,
+      ...extractorArgs(clients),
       ...ageGateArgs(),
-      ...(cookieFile ? ["--cookies", cookieFile] : []),
       url,
     ];
-    if (cookieFile) {
-      console.log(`analyze: using server cookies (file: ${path.basename(cookieFile)}, exists: ${existsSync(cookieFile)})`);
+    if (i === 0) {
+      console.log(`analyze: trying primary client(s): ${clients}`);
     } else {
-      console.log("analyze: anonymous mode (no cookies)");
+      console.log(`analyze: falling back to client(s): ${clients}`);
     }
-    const raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
-
-    if (!raw || !raw.trim()) {
-      // Retry with a more permissive client (mweb is known to bypass age-gate).
-      console.warn("analyzeUrl: empty output, retrying with mweb/tv_embedded clients");
-      const retryArgs = args.map((a) => {
-        if (a.startsWith("youtube:player_client=")) {
-          return "youtube:player_client=mweb,web_safari,android";
-        }
-        return a;
-      });
-      try {
-        const rawRetry = await runCommand(resolveYtDlp(), retryArgs, ANALYZE_TIMEOUT_MS);
-        if (rawRetry && rawRetry.trim()) {
-          return parseAnalyzeOutput(url, rawRetry);
-        }
-      } catch (retryErr) {
-        console.error("analyzeUrl retry also failed:", retryErr?.message || retryErr);
+    try {
+      const raw = await runCommand(resolveYtDlp(), args, ANALYZE_TIMEOUT_MS);
+      if (raw && raw.trim()) {
+        const parsed = parseAnalyzeOutput(url, raw);
+        if (parsed.success) return parsed;
+        // Parsing failed (e.g. non-JSON); remember the error and try the
+        // fallback client.
+        lastError = new Error(parsed.error || "parse failed");
+      } else {
+        lastError = new Error("yt-dlp produced no output");
       }
-      return failure("yt-dlp produced no output", "Video not accessible — please try again.");
+    } catch (err) {
+      const msg = (err?.message || String(err)).toString();
+      lastError = err;
+      console.error(`analyze: client "${clients}" failed: ${msg.slice(0, 300)}`);
+      // If this was a YouTube block (429 / n-challenge / PO token), don't
+      // bother trying the fallback — the fallback will fail for the same
+      // reason. Return the friendly message immediately.
+      if (isYouTubeBlock(msg)) {
+        const message = "YouTube temporarily blocked this server. Try again later.";
+        return failure("youtube-blocked", message);
+      }
+      // Otherwise, continue to the next fallback client.
     }
-
-    return parseAnalyzeOutput(url, raw);
-  } catch (err) {
-    console.error("analyzeUrl caught error:", err?.message || err);
-    return failure(err?.message || "unknown error", friendlyError(err?.message || "unknown error", cookiesEnabled()));
   }
+
+  // All attempts failed.
+  const finalMsg = lastError?.message || "unknown error";
+  return failure(finalMsg, friendlyError(finalMsg, cookiesEnabled()));
+}
+
+// Returns true if the error message looks like YouTube is actively blocking
+// this server (rate limit, challenge solver, PO token missing, etc.). When
+// true, retrying with a different client won't help — the IP is throttled.
+function isYouTubeBlock(msg) {
+  if (!msg || typeof msg !== "string") return false;
+  return (
+    msg.includes("HTTP Error 429") ||
+    msg.includes("429 Too Many Requests") ||
+    msg.includes("n challenge") ||
+    msg.includes("n-challenge") ||
+    msg.includes("PO Token") ||
+    msg.includes("PO token") ||
+    msg.includes("Sign in to confirm")
+  );
 }
 
 function parseAnalyzeOutput(url, raw) {
@@ -154,19 +218,21 @@ function parseAnalyzeOutput(url, raw) {
     return failure("yt-dlp returned non-JSON output", "Video not accessible — please try again.");
   }
 
+  // Only the metadata fields the client actually needs. Do not fail if some
+  // are missing (e.g. private/age-gated/region-locked videos may report
+  // partial info). In particular, `formats` is often empty or missing when
+  // YouTube refuses to hand us a player response — that's fine, the client
+  // just shows whatever we have.
   const formats = normalizeFormats(info.formats || []);
-  if (formats.length === 0) {
-    return failure("No video formats found", "Video not accessible.");
-  }
 
   return {
     success: true,
     data: {
       url,
-      title: info.title,
-      thumbnail: info.thumbnail,
-      duration: info.duration,
-      uploader: info.uploader,
+      title: info.title || null,
+      thumbnail: info.thumbnail || null,
+      duration: info.duration ?? null,
+      uploader: info.uploader || null,
       formats,
       videoQualities: [...new Set(formats.filter((format) => format.hasVideo).map((format) => format.qualityLabel))].filter(Boolean),
       audioFormats: [...new Set(formats.filter((format) => format.hasAudio).map((format) => format.ext))].filter(Boolean)
@@ -190,6 +256,7 @@ export function startDownload(job, onUpdate) {
   const args = buildYtDlpArgs({ ...job.request, url: job.request.url }, outputTemplate);
   for (const arg of cookieArgs()) args.push(arg);
   args.push("--throttled-rate", THROTTLED_RATE);
+  args.push(...sleepArgs());
   args.push(...extractorArgs());
 
   const child = spawn(resolveYtDlp(), args, { windowsHide: true });
@@ -215,7 +282,14 @@ export function startDownload(job, onUpdate) {
     }
     parseProgress(job, text, onUpdate);
   });
-  child.stderr.on("data", (chunk) => parseProgress(job, chunk.toString(), onUpdate));
+  child.stderr.on("data", (chunk) => {
+    const text = chunk.toString();
+    // Keep the most recent stderr so the close handler can classify the
+    // failure (e.g. HTTP 429, n-challenge) and surface a friendly message.
+    // Cap at 16 KB to bound memory per job.
+    job.lastStderr = ((job.lastStderr || "") + text).slice(-16 * 1024);
+    parseProgress(job, text, onUpdate);
+  });
 
   child.on("error", (error) => {
     clearTimeout(timeout);
@@ -235,10 +309,20 @@ export function startDownload(job, onUpdate) {
       return;
     }
     if (code !== 0) {
-      const hint = cookiesActive
-        ? " Your server cookies may have expired — try refreshing them."
-        : " YouTube may be blocking the request (server cookies not configured).";
-      update(job, { state: DOWNLOAD_STATES.FAILED, error: `Processor exited with code ${code}.${hint}` }, onUpdate);
+      // Look up the last stderr we captured during the run to build a
+      // user-friendly failure message. yt-dlp writes the meaningful error
+      // (429, n-challenge, PO token) to stderr, not stdout.
+      const stderr = (job.lastStderr || "").toString();
+      let friendly;
+      if (isYouTubeBlock(stderr)) {
+        friendly = "YouTube temporarily blocked this server. Try again later.";
+      } else {
+        const hint = cookiesActive
+          ? " Your server cookies may have expired — try refreshing them."
+          : " YouTube may be blocking the request (server cookies not configured).";
+        friendly = `Processor exited with code ${code}.${hint}`;
+      }
+      update(job, { state: DOWNLOAD_STATES.FAILED, error: friendly, process: null }, onUpdate);
       return;
     }
 
@@ -326,6 +410,15 @@ function height(quality) {
 
 function friendlyError(msg, hasCookies) {
   if (!msg || typeof msg !== "string") return "Video not accessible — please try again.";
+
+  // YouTube is actively blocking this server. Covers HTTP 429 rate limits,
+  // n-challenge solver failures, and missing PO token. All three are IP-level
+  // throttles — neither cookies nor a client change will help in the short
+  // term, so we surface a single, calm message.
+  if (isYouTubeBlock(msg)) {
+    return "YouTube temporarily blocked this server. Try again later.";
+  }
+
   if (msg.includes("Sign in to confirm")) {
     return hasCookies
       ? "YouTube is still blocking this request even with cookies. Your server cookies may be expired or from the wrong account. Try refreshing them."
